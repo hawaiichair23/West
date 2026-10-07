@@ -13,8 +13,10 @@ import type { Bandit } from '../world/bandit'
 import type { TroughKind } from '../world/troughs'
 import { TROUGH_PER_TILE_CAP, TROUGH_FILL_LEVELS } from '../world/troughs'
 import { PLACES } from '../world/places'
+import { RECIPES } from '../items/recipes'
+import { makeRng } from '../world/gen'
 
-export type BuildingType = 'empty' | 'mill' | 'workshop' | 'well' | 'field' | 'storage' | 'smelter' | 'blast_furnace'
+export type BuildingType = 'empty' | 'mill' | 'workshop' | 'well' | 'field' | 'storage' | 'smelter' | 'blast_furnace' | 'depot'
 export type BuiltType = Exclude<BuildingType, 'empty'>
 
 export const MAX_GOLD = 999_999
@@ -33,7 +35,7 @@ export const WOOD_TILE = 24
 // resizes them at runtime.
 const INITIAL_WORLD_PX = 576 * 8
 
-export const PLAYER_BASE_SPEED = 11135
+export const PLAYER_BASE_SPEED = 135
 
 export interface WorldBounds {
   minX: number
@@ -111,6 +113,8 @@ export interface PlotState {
   // storage-only: item grid contents. undefined for non-storage plots;
   // initialized when a storage building is built. Size grows with level.
   storageContents?: (ItemStack | null)[]
+  depotContents?: (ItemStack | null)[]
+  depotOrder?: { type: ItemType, count: number }[]
   // Smelter-class plots (smelter, blast furnace, future smelters). Lazy-init
   // on first tick. Shape is identical regardless of which smelter type.
   smelt?: SmeltingState
@@ -162,6 +166,29 @@ export const BUILDINGS: Record<BuiltType, BuildingDef> = {
   storage: { name: 'Storage', description: 'Stores items.', cost: 100, tickMs: 0, goldPerTick: 0 },
   smelter: { name: 'Smelter', description: 'Smelts ores into bars.', cost: 100, tickMs: 0, goldPerTick: 0, smelting: SMELTER_SMELTING },
   blast_furnace: { name: 'Blast Furnace', description: 'Refines iron into steel using coke.', cost: 250, tickMs: 0, goldPerTick: 0, smelting: BLAST_SMELTING },
+  depot: { name: 'Depot', description: 'Wagons collect goods for pay.', cost: 0, tickMs: 0, goldPerTick: 0 },
+}
+
+export const DEPOT_SLOT_COUNT = 12
+
+export const DEPOT_ORDER_POOL: ItemType[] = [...new Set(RECIPES.map(r => r.output))]
+const DEPOT_ORDER_MIN_TYPES = 2
+const DEPOT_ORDER_MAX_TYPES = 4
+const DEPOT_ORDER_MIN_COUNT = 10
+const DEPOT_ORDER_MAX_COUNT = 40
+
+export function rollDepotOrder(): { type: ItemType, count: number }[] {
+  const rng = makeRng(state.worldSeed ^ (state.gameTime * 2654435761 >>> 0))
+  const typeCount = DEPOT_ORDER_MIN_TYPES + Math.floor(rng() * (DEPOT_ORDER_MAX_TYPES - DEPOT_ORDER_MIN_TYPES + 1))
+  const pool = DEPOT_ORDER_POOL.slice()
+  const order: { type: ItemType, count: number }[] = []
+  for (let i = 0; i < typeCount && pool.length > 0; i++) {
+    const idx = Math.floor(rng() * pool.length)
+    const type = pool.splice(idx, 1)[0]
+    const count = DEPOT_ORDER_MIN_COUNT + Math.floor(rng() * (DEPOT_ORDER_MAX_COUNT - DEPOT_ORDER_MIN_COUNT + 1))
+    order.push({ type, count })
+  }
+  return order
 }
 
 export const BUILDING_LIST: BuiltType[] = ['mill', 'well', 'workshop', 'field', 'storage', 'smelter', 'blast_furnace']
@@ -233,6 +260,12 @@ class GameState {
   gold = 20
   maxHealth = BASE_MAX_HEALTH
   health = BASE_MAX_HEALTH
+  heartsRevealed = false
+  deputized = false
+  lieutenantInterceptedFW = false
+  flags: Set<string> = new Set()
+  tempMaxHealthBonus = 0
+  tempMaxHealthExpiry = 0
   plots: PlotState[] = []
   // Fixed world buildings (shop, church, etc.) — not owned, not bought, no ticks.
   worldStructures: WorldStructure[] = []
@@ -284,6 +317,7 @@ class GameState {
   // interior was rolled to have no crate. Otherwise a contents grid the open-UI
   // reads, seeded once on first visit and persisted across visits.
   walkableInteriorCrates: Record<string, { contents: (ItemStack | null)[] } | null> = {}
+  interiorBanditRolled: Record<string, boolean> = {}
   // Revealed but not yet collected — sprite drawn at position, walk over to claim.
   revealedItems: { x: number; y: number; reward: number }[] = []
   // Items dropped by the player into the world — walk over them to pick up.
@@ -302,7 +336,7 @@ class GameState {
   // and an obstacle in collision. `species` chooses which sprite to render —
   // 'post' (weathered cottonwood gray) or 'cedar_post' (warm cedar brown).
   // Mechanically identical otherwise.
-  placedPosts: { x: number; y: number; species?: 'post' | 'cedar_post' | 'iron_post' | 'wood_wall' }[] = []
+  placedPosts: { x: number; y: number; species?: 'post' | 'cedar_post' | 'iron_post' | 'wood_wall'; protected?: boolean }[] = []
   // Troughs placed by the player (water and future palette-swapped kinds).
   // Position + kind; grid-snapped. Kind is the held item's type at place time.
   placedTroughs: { x: number; y: number; kind: TroughKind; fill: number; displayLevel: number }[] = []
@@ -334,11 +368,14 @@ class GameState {
   // Dead bandits left in the world. Distinct from coyote carcasses because these
   // are meant to be looted/carried for bounty later — each needs a stable id and a
   // carried flag so a specific body can be picked up, hauled, and turned in.
-  banditBodies: { id: number; x: number; y: number; carried: boolean; contents: (ItemStack | null)[]; name: string; bounty: number }[] = []
+  banditBodies: { id: number; x: number; y: number; carried: boolean; contents: (ItemStack | null)[]; name: string; bounty: number; interiorKey?: string }[] = []
   nextBanditBodyId = 1
   carriedBandit: { name: string; bounty: number; contents: (ItemStack | null)[] } | null = null
   honseBanditRiders: Map<number, { name: string; bounty: number; contents: (ItemStack | null)[] }> = new Map()
-  npcs: { x: number; y: number; name: string; lines: { text: string; speaker?: string; options?: { label: string; act: () => void }[] }[] }[] = []
+  npcs: { x: number; y: number; name: string; sprite?: string; graph?: string; lines: { text: string; speaker?: string; options?: { label: string; act: () => void }[] }[] }[] = []
+  trailSigns: { x: number; y: number; fwMiles: number; lsMiles: number }[] = []
+  crossroadsSigns: { x: number; y: number }[] = []
+  deadTravelers: { x: number; y: number; header: string; text: string; sprite: string }[] = []
   // Index into `honses` of the honse the player is currently riding, or null.
   // While set, the honse's AI is suppressed and player input moves the honse;
   // the player sprite is locked to the honse position each frame.
@@ -461,7 +498,10 @@ class GameState {
   getBags(): ItemStack[] {
     const out: ItemStack[] = []
     for (const s of this.inventory) {
-      if (s !== null && isBag(s.type)) out.push(s)
+      if (s !== null && isBag(s.type)) {
+        if (!s.contents) s.contents = createBagContents(s.type)
+        out.push(s)
+      }
     }
     return out
   }
@@ -512,7 +552,8 @@ class GameState {
   // starter farm grid plus any town/site plots — so the count isn't fixed here
   // and grows as the map expands.
   init() {
-    this.gold = 2000
+    // Game starting gold: 50
+    this.gold = 50
     this.maxHealth = BASE_MAX_HEALTH
     this.health = this.maxHealth
     // Roll this world's seed. generateWorld reads state.worldSeed, so the
@@ -537,6 +578,7 @@ class GameState {
     this.buriedStacks = []
     this.walkableInteriors = {}
     this.walkableInteriorCrates = {}
+    this.interiorBanditRolled = {}
     this.revealedItems = []
     this.droppedItems = []
     this.plantedTrees = []
@@ -562,10 +604,10 @@ class GameState {
     this.mounted = null
     this.generalStoreSlots = new Map()
     //this.inventory[0] = { type: 'bush', count: 64 }
-    this.inventory[1] = { type: 'tempered_axe', count: 1 }
+    //this.inventory[1] = { type: 'bread', count: 1 }
     //this.inventory[2] = { type: 'gold_lockbox', count: 5 }
-    this.inventory[3] = { type: 'post', count: 964 }
-    this.inventory[4] = { type: 'fence_gate', count: 96 }
+    //this.inventory[3] = { type: 'flagstone', count: 64 }
+    //this.inventory[4] = { type: 'wood', count: 32 }
   }
 
   // Fan the state-backed authored content (structures, troughs, posts, solid +
@@ -573,9 +615,9 @@ class GameState {
   // gates are scene-built in Overworld since they need scene-only helpers.
   private buildAuthoredPlaces() {
     for (const place of Object.values(PLACES)) {
-      for (const s of place.structures) this.worldStructures.push({ type: s.type, x: s.x, y: s.y, flipX: s.flipX, sprite: s.sprite, interior: s.interior })
+      for (const s of place.structures) this.worldStructures.push({ type: s.type, x: s.x, y: s.y, flipX: s.flipX, sprite: s.sprite, interior: s.interior, midCount: s.midCount, door: s.door })
       for (const t of place.troughs) this.placedTroughs.push({ x: t.x, y: t.y, kind: t.kind, fill: TROUGH_PER_TILE_CAP[t.kind], displayLevel: TROUGH_FILL_LEVELS })
-      for (const p of place.posts) this.placedPosts.push({ x: p.x, y: p.y, species: p.species })
+      for (const p of place.posts) this.placedPosts.push({ x: p.x, y: p.y, species: p.species, protected: p.protected })
       for (const d of place.solidDecor) this.worldSolidDecor.push({ type: d.type, x: d.x, y: d.y })
       for (const d of place.decor) this.worldDecor.push({ sprite: d.sprite, x: d.x, y: d.y, scale: d.scale, depth: d.depth })
     }
@@ -707,8 +749,32 @@ class GameState {
 
   applyFoodEffects(def: ItemDef, registry: Phaser.Data.DataManager) {
     if (def.maxHeartsBonus) this.increaseMaxHealth(def.maxHeartsBonus, registry)
+    if (def.tempHeartsBonus && def.tempHeartsDurationMs) this.applyTempHearts(def.tempHeartsBonus, def.tempHeartsDurationMs, registry)
     if (def.healFull) this.healToFull(registry)
     else if (def.healHearts) this.changeHealth(def.healHearts, registry)
+  }
+
+  applyTempHearts(bonus: number, durationMs: number, registry: Phaser.Data.DataManager) {
+    if (this.tempMaxHealthBonus > 0) {
+      this.maxHealth -= this.tempMaxHealthBonus
+    }
+    this.tempMaxHealthBonus = bonus
+    this.tempMaxHealthExpiry = this.gameTime + durationMs
+    this.maxHealth += bonus
+    this.health = Math.min(this.health + bonus, this.maxHealth)
+    registry.set('playerMaxHealth', this.maxHealth)
+    registry.set('playerHealth', this.health)
+  }
+
+  expireTempHearts(registry: Phaser.Data.DataManager) {
+    if (this.tempMaxHealthBonus <= 0) return
+    if (this.gameTime < this.tempMaxHealthExpiry) return
+    this.maxHealth -= this.tempMaxHealthBonus
+    this.health = Math.min(this.health, this.maxHealth)
+    this.tempMaxHealthBonus = 0
+    this.tempMaxHealthExpiry = 0
+    registry.set('playerMaxHealth', this.maxHealth)
+    registry.set('playerHealth', this.health)
   }
 
   // Consume one edible from a hotbar slot and apply its effects. Returns the
@@ -780,6 +846,9 @@ class GameState {
     if (type === 'storage') {
       plot.storageContents = Array.from({ length: getStorageSlotCount(1) }, () => null)
     }
+    if (type === 'depot') {
+      plot.depotContents = Array.from({ length: DEPOT_SLOT_COUNT }, () => null)
+    }
     return true
   }
   clearPlot(plotIndex: number): ItemStack[] {
@@ -791,6 +860,7 @@ class GameState {
     if (plot.craftInputs) for (const s of plot.craftInputs) if (s) spill.push(s)
     if (plot.craftOutput) spill.push(plot.craftOutput)
     if (plot.storageContents) for (const s of plot.storageContents) if (s) spill.push(s)
+    if (plot.depotContents) for (const s of plot.depotContents) if (s) spill.push(s)
 
     plot.built = 'empty'
     plot.level = 1
@@ -802,6 +872,8 @@ class GameState {
     plot.autoCraft = undefined
     plot.fieldCells = undefined
     plot.storageContents = undefined
+    plot.depotContents = undefined
+    plot.depotOrder = undefined
 
     return spill
   }

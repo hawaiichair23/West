@@ -208,10 +208,8 @@ export class CursorController {
             }
           } else {
             this.setTexture(entry.texture, entry.scale)
-            // The grab-cursor sprite is white art designed to be tinted by the
-            // grass/non-grass rule (clearTint over grass, gold otherwise). Other
-            // entry textures (cursor_x, etc.) have native colors — skip tinting.
             if (entry.texture === 'cursor_grab') this.applyArrowTerrainTint()
+            else if (entry.texture === 'cursor_x') this.updateToolOutline()
           }
           return
         }
@@ -224,7 +222,9 @@ export class CursorController {
       if (walkableCtx && !uiPanelOpen) {
         const p = this.scene.input.activePointer
         const drag = (this.scene as any).getDragController?.()
-        const action = resolveAction(walkableCtx, p.x, p.y, drag?.isHolding() ?? false)
+        const cam = interiorScene?.cameras?.main as Phaser.Cameras.Scene2D.Camera | undefined
+        const wp = cam ? cam.getWorldPoint(p.x, p.y) : p
+        const action = resolveAction(walkableCtx, wp.x, wp.y, drag?.isHolding() ?? false)
         if (action) {
           const entry = ACTION_CURSOR[action.kind]
           if (entry === 'tool') {
@@ -241,6 +241,7 @@ export class CursorController {
           } else {
             this.setTexture(entry.texture, entry.scale)
             if (entry.texture === 'cursor_grab') this.applyArrowTerrainTint()
+            else if (entry.texture === 'cursor_x') this.updateToolOutline()
           }
           return
         }
@@ -284,7 +285,8 @@ export class CursorController {
 
   private applyToolCursorSprite(sprite: string, scale: number) {
     this.setTexture(sprite, scale)
-    if (spriteGetsOutline(sprite)) this.updateToolOutline()
+    const inInterior = this.scene.scene.manager.isActive('Interior')
+    if (inInterior || spriteGetsOutline(sprite)) this.updateToolOutline()
     else this.clearToolOutline()
   }
 

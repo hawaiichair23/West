@@ -3,6 +3,7 @@ import { state } from './state'
 import { TOOL_RANGE } from './ItemActionController'
 import { ITEMS } from '../items/types'
 import { makeRng } from '../world/gen'
+import { outlineIcon } from '../ui/iconOutline'
 import { listEnemies, type EnemyRef } from '../world/enemy'
 import { startBanditRetreat, BANDIT_KNOCKBACK, BANDIT_KNOCKBACK_MS } from '../world/bandit'
 import type { Bandit } from '../world/bandit'
@@ -74,14 +75,14 @@ export function spawnParticles(scene: Phaser.Scene, x: number, y: number, colors
 // scene population, so each scene supplies an onHit callback; everything else —
 // fire cadence, ammo, reload, spawning, movement, despawn — is shared here.
 
-export const BULLET_SPEED = 600   // px/sec
+export const BULLET_SPEED = 720
 
 export interface Bullet {
   x: number
   y: number
   vx: number
   vy: number
-  sprite: Phaser.GameObjects.Rectangle
+  sprite: Phaser.GameObjects.Sprite
   fromBandit: boolean
 }
 
@@ -96,7 +97,7 @@ export const ENEMY_KNOCKBACK = 250
 export const ENEMY_KNOCKBACK_MS = 200
 export const ENEMY_HURT_MS = 400
 export const ENEMY_DEATH_MS = 200
-export const WEAPON_DAMAGE: Record<string, number> = { axe: 3 }
+export const ENEMY_HOP_H = 8
 export const CHOP_COOLDOWN_MS = 0
 
 export function damageEnemy(ref: EnemyRef, amount: number, fromX: number, fromY: number, ignoreInvuln = false, melee = false): boolean {
@@ -167,12 +168,16 @@ export class GunController {
   private readonly bulletRng: () => number
   private readonly bulletW: number
   private readonly bulletH: number
-
+  private bulletOutline: number | null = null
 
   constructor(seed = 0, bulletW = 8, bulletH = 3) {
     this.bulletRng = makeRng(seed)
     this.bulletW = bulletW
     this.bulletH = bulletH
+  }
+
+  setBulletOutline(color: number | null) {
+    this.bulletOutline = color
   }
 
   // Reset/refresh ammo when the selected gun slot changes. Returns the gun def
@@ -221,9 +226,11 @@ export class GunController {
     if (def.gunSpread > 0) angle += (this.bulletRng() - 0.5) * def.gunSpread
     const vx = Math.cos(angle) * BULLET_SPEED
     const vy = Math.sin(angle) * BULLET_SPEED
-    const sprite = scene.add.rectangle(px, py, this.bulletW, this.bulletH, 0x2A2A2A)
+    const sprite = scene.add.sprite(px, py, 'bullet')
       .setDepth(50000)
       .setRotation(angle)
+      .setDisplaySize(this.bulletW, this.bulletH)
+    if (this.bulletOutline !== null) outlineIcon(sprite, this.bulletOutline)
     this.bullets.push({ x: px, y: py, vx, vy, sprite, fromBandit: false })
 
     if (def.gunAmmo != null) {
@@ -247,9 +254,11 @@ export class GunController {
   spawnHostile(scene: Phaser.Scene, px: number, py: number, angle: number) {
     const vx = Math.cos(angle) * BULLET_SPEED
     const vy = Math.sin(angle) * BULLET_SPEED
-    const sprite = scene.add.rectangle(px, py, this.bulletW, this.bulletH, 0x2A2A2A)
+    const sprite = scene.add.sprite(px, py, 'bullet')
       .setDepth(50000)
       .setRotation(angle)
+      .setDisplaySize(this.bulletW, this.bulletH)
+    if (this.bulletOutline !== null) outlineIcon(sprite, this.bulletOutline)
     this.bullets.push({ x: px, y: py, vx, vy, sprite, fromBandit: true })
   }
 

@@ -43,6 +43,7 @@ export interface SiteTemplate {
   name: string
   buildings: SiteBuilding[]
   decor?: { dx: number; dy: number; sprite: string; scale: number; depth?: number }[]
+  deadTravelers?: { dx: number; dy: number; header: string; text: string; sprite: string }[]
   // Solid decor placed relative to the site origin. Unlike `decor` (pure visual,
   // walk-through), each entry gets a collider from its DECOR catalog hitbox via
   // the shared placeNonEnterable path. Sprite/scale/hitbox resolve from DECOR and
@@ -80,6 +81,20 @@ export interface PlacedSite {
 // scattered frontier houses are empty husks, unlike the authored hemp house
 // in town). Ghost-town and camp templates get added here later.
 export const SITE_TEMPLATES: Record<string, SiteTemplate> = {
+  downed_caravan: {
+    id: 'downed_caravan',
+    name: 'Downed Caravan',
+    side: 'north',
+    offsetMin: 60,
+    offsetMax: 60,
+    buildings: [],
+    decor: [
+      { dx: 0, dy: 0, sprite: 'wagon_downed', scale: 3 },
+    ],
+    deadTravelers: [
+      { dx: 42, dy: 28, sprite: 'mummified_body', header: 'Mummified man', text: 'The salt has cured his cholera. It has pulled his skin taut by drinking the moisture from the soft tissue.' },
+    ],
+  },
   lone_house: {
     id: 'lone_house',
     name: 'Abandoned House',

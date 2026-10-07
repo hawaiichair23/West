@@ -1,8 +1,9 @@
 import Phaser from 'phaser'
 import { COLORS, FONT } from '../colors'
-import { state } from '../game/state'
+import { state, DEPOT_SLOT_COUNT, type BuiltType } from '../game/state'
 import { registerGrabbable } from '../ui/hover'
 import { PLOT_SIZE } from './plotConstants'
+import { ITEMS } from '../items/types'
 
 export interface PlotView {
   x: number
@@ -23,9 +24,19 @@ export function createPlot(
   y: number,
   plotViews: PlotView[],
   deps: PlotClickDeps,
+  preBuilt?: BuiltType,
 ): number {
   const plotIndex = state.plots.length
-  state.plots.push({ built: 'empty', level: 1, lastTickAt: 0, lastItemTickAt: 0, output: null })
+  state.plots.push({
+    built: preBuilt ?? 'empty',
+    level: 1,
+    lastTickAt: 0,
+    lastItemTickAt: 0,
+    output: null,
+    depotContents: preBuilt === 'depot'
+      ? Array.from({ length: DEPOT_SLOT_COUNT }, () => null)
+      : undefined,
+  })
 
   const rect = scene.add.rectangle(x, y, PLOT_SIZE, PLOT_SIZE, COLORS.plotFill)
     .setStrokeStyle(2, COLORS.plotBorder)
@@ -35,6 +46,7 @@ export function createPlot(
   const priceTag = scene.add.bitmapText(x, y, 'main', '$', FONT.cost)
     .setOrigin(0.5, 0.5)
     .setTint(COLORS.plotPriceTag)
+    .setVisible(!preBuilt)
 
   const view: PlotView = { x, y, priceTag, building: null, nameLabel: null }
   plotViews.push(view)
@@ -48,7 +60,8 @@ export function createPlot(
       return
     }
 
-    if (heldType === 'axe' || heldType === 'pickaxe') {
+    const heldDef = heldType ? ITEMS[heldType] : null
+    if (heldDef && (heldDef.chopping != null || heldDef.mining != null)) {
       if (deps.onDestroyPlot(p.worldX, p.worldY)) return
     }
     if (!p.leftButtonDown()) return

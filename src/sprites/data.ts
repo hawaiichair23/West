@@ -223,6 +223,15 @@ export const HEART_CONST_HALF: Sprite = recolorHeart(HEART_HALF)
 export const HEART_CONST_1Q: Sprite = recolorHeart(HEART_1Q)
 export const HEART_CONST_EMPTY: Sprite = recolorHeart(HEART_EMPTY)
 
+const htF = '#7EC8E3'
+const htE = '#2A5A6E'
+const recolorHeartTemp = (s: Sprite): Sprite => s.map(row => row.map(c => c === hM ? htF : c === hE ? htE : c))
+export const HEART_TEMP_FULL: Sprite = recolorHeartTemp(HEART_FULL)
+export const HEART_TEMP_3Q: Sprite = recolorHeartTemp(HEART_3Q)
+export const HEART_TEMP_HALF: Sprite = recolorHeartTemp(HEART_HALF)
+export const HEART_TEMP_1Q: Sprite = recolorHeartTemp(HEART_1Q)
+export const HEART_TEMP_EMPTY: Sprite = recolorHeartTemp(HEART_EMPTY)
+
 export const GOLD_COIN: Sprite = [
   [_,_,_,cD,cD,_,_,_],
   [_,_,cD,cL,cL,cD,_,_],
@@ -235,25 +244,47 @@ export const GOLD_COIN: Sprite = [
 ]
 
 // ---- PLAYER ----
-const SK = '#D19766'
+const SK = '#c48d5f'
 const RD = hexStr(COLORS.playerShirt)
 const GN = '#228822'
 const BT = '#553311'
 const HR = '#1A0F08'
 
+const BUL = '#2A2A2A'
+export const BULLET: Sprite = [
+  [BUL,BUL,BUL,BUL,BUL,BUL,BUL,BUL],
+  [BUL,BUL,BUL,BUL,BUL,BUL,BUL,BUL],
+  [BUL,BUL,BUL,BUL,BUL,BUL,BUL,BUL],
+]
+
 export const PLAYER: Sprite = [
   [_,_,HR,HR,HR,HR,_,_],
   [_,HR,HR,HR,HR,HR,HR,_],
   [_,_,SK,SK,SK,SK,_,_],
-  [_,_,RD,RD,RD,RD,_,_],
   [_,RD,RD,RD,RD,RD,RD,_],
-  [_,_,RD,RD,RD,RD,_,_],
-  [_,_,GN,GN,GN,GN,_,_],
+  [_,RD,RD,RD,RD,RD,RD,_],
+  [_,SK,RD,RD,RD,RD,SK,_],
+  [_,_,BT,BT,BT,BT,_,_],
+  [_,_,BT,_,_,BT,_,_],
   [_,_,BT,_,_,BT,_,_],
 ]
 
 // Solid-red silhouette 
 export const PLAYER_HURT: Sprite = PLAYER.map(row => row.map(cell => cell === _ ? _ : RD))
+
+const MN_SHIRT = '#c8bea8'
+const MN_PANT = '#6B4A2E'
+export const MINER: Sprite = [
+  [_,_,MN_PANT,MN_PANT,MN_PANT,MN_PANT,_,_],
+  [_,MN_PANT,MN_PANT,MN_PANT,MN_PANT,MN_PANT,MN_PANT,_],
+  [_,_,SK,HR,SK,SK,_,_],
+  [_,MN_SHIRT,MN_SHIRT,MN_SHIRT,MN_SHIRT,MN_SHIRT,MN_SHIRT,_],
+  [_,SK,MN_SHIRT,MN_SHIRT,MN_SHIRT,MN_SHIRT,SK,_],
+  [_,SK,MN_SHIRT,MN_SHIRT,MN_SHIRT,MN_SHIRT,SK,_],
+  [_,_,MN_PANT,MN_PANT,MN_PANT,MN_PANT,_,_],
+  [_,_,MN_PANT,_,_,MN_PANT,_,_],
+  [_,_,MN_PANT,_,_,MN_PANT,_,_],
+]
 
 // ---- CAVALRY TROOPER ---- 
 const tvHat = '#3a3326'   // slouch hat (dusty brown-black)
@@ -267,6 +298,50 @@ const bs = '#d2b017'
 const tvBoot = '#3a2614'  // riding boots
 const tvGun = '#6b4a2a'   // rifle wood/barrel
 const tvGunD = '#4a3019'  // rifle shadow
+
+export const CAVALRY_TROOPER_LEANING: Sprite = [
+  [_,_,tvHatB,tvHatB,tvHatB,_,_,_,_,_],
+  [_,tvHatB,tvHatB,tvHatB,tvHatB,tvHatB,tvHatB,_,_,_],
+  [tvHat,tvHat,tvHat,tvHat,tvHat,tvHat,_,_,_,_],
+  [_,_,tvGunD,tvSkin,tvSkin,_,_,_,_,_],
+  [_,_,bs,bs,tvCoat,_,_,_,_,_],
+  [_,tvCoat,tvCoat,tvCoat,tvCoatD,_,_,_,_,_],
+  [_,tvCoat,tvCoat,tvCoat,tvCoat,_,_,_,_,_],
+  [_,tvCoat,tvCoat,tvCoat,tvCoat,tvCoat,_,_,_,_],
+  [_,tvCoat,tvCoat,tvCoat,tvCoat,tvCoat,_,_,_,_],
+  [_,_,tvCoat,tvCoat,tvCoatD,tvCoat,_,_,_,_],
+  [_,_,tvCoat,tvCoat,tvCoat,tvCoat,tvCoat,_,_,_],
+  [_,_,_,tvPant,tvStripe,tvPant,_,_,_,_],
+  [_,_,_,tvPant,tvStripe,tvPant,_,_,_,_],
+  [_,_,_,_,tvPant,tvStripe,tvPant,_,_,_],
+  [_,_,_,_,tvPant,tvStripe,tvPant,_,_,_],
+  [_,_,_,_,tvPant,tvStripe,tvPant,_,_,_],
+  [_,_,_,_,tvPant,tvStripe,tvPant,_,_,_],
+  [_,_,_,_,tvPant,tvStripe,tvPant,_,_,_],
+  [_,_,_,_,tvBoot,tvBoot,tvBoot,tvBoot,_,_],
+]
+
+export const CAVALRY_TROOPER_UPRIGHT: Sprite = [
+  [_,_,_,tvHatB,tvHatB,tvHatB,_,_,_,_],
+  [_,_,tvHatB,tvHatB,tvHatB,tvHatB,tvHatB,tvHatB,_,_],
+  [_,tvHat,tvHat,tvHat,tvHat,tvHat,tvHat,_,_,_],
+  [_,_,_,tvGunD,tvSkin,tvSkin,_,_,_,_],
+  [_,_,bs,bs,tvCoat,tvCoat,_,_,_,_],
+  [_,_,tvCoat,tvCoat,tvCoat,tvCoat,_,_,_,_],
+  [_,_,tvCoat,tvCoat,tvCoat,tvCoat,_,_,_,_],
+  [_,_,tvCoat,tvCoat,tvCoat,tvCoat,_,_,_,_],
+  [_,_,tvCoat,tvCoat,tvCoat,tvCoat,_,_,_,_],
+  [_,_,tvCoat,tvCoat,tvCoat,tvCoat,_,_,_,_],
+  [_,_,tvCoat,tvCoat,tvCoat,tvCoat,_,_,_,_],
+  [_,_,tvCoat,tvCoat,tvCoat,tvPant,_,_,_,_],
+  [_,_,_,tvPant,tvStripe,tvPant,_,_,_,_],
+  [_,_,_,tvPant,tvStripe,tvPant,_,_,_,_],
+  [_,_,_,tvPant,tvStripe,tvPant,_,_,_,_],
+  [_,_,_,tvPant,tvStripe,tvPant,_,_,_,_],
+  [_,_,_,tvPant,tvStripe,tvPant,_,_,_,_],
+  [_,_,_,tvPant,tvStripe,tvPant,_,_,_,_],
+  [_,_,_,tvBoot,tvBoot,tvBoot,tvBoot,_,_,_],
+]
 
 export const CAVALRY_TROOPER: Sprite = [
   [_,_,_,tvHatB,tvHatB,tvHatB,_,_,_,tvGunD],
@@ -312,6 +387,26 @@ export const CAVALRY_TROOPER_STEP: Sprite = [
   [_,_,_,tvBoot,tvBoot,tvBoot,tvBoot,tvBoot,_,_],
 ]
 
+export const CAVALRY_TROOPER_MOUNTED: Sprite = [
+  [_,_,_,tvHatB,tvHatB,tvHatB,_,_,_,_],
+  [_,_,tvHatB,tvHatB,tvHatB,tvHatB,tvHatB,tvHatB,_,_],
+  [_,tvHat,tvHat,tvHat,tvHat,tvHat,tvHat,_,_,_],
+  [_,_,_,tvGunD,tvSkin,tvSkin,_,_,_,_],
+  [_,_,bs,bs,tvCoat,tvCoat,_,_,_,_],
+  [_,_,tvCoat,tvCoat,tvCoat,tvCoat,_,_,_,_],
+  [_,_,tvCoat,tvCoat,tvCoat,tvCoat,_,_,_,_],
+  [_,_,tvCoat,tvCoat,tvCoat,tvCoat,tvCoat,_,_,_],
+  [_,_,tvCoat,tvCoat,tvCoatD,tvCoat,tvCoat,_,_,_],
+  [_,_,tvCoat,tvCoat,tvCoat,tvCoat,_,_,_,_],
+  [_,_,tvCoat,tvPant,tvStripe,tvPant,_,_,_,_],
+  [_,_,_,tvPant,tvStripe,tvPant,_,_,_,_],
+  [_,_,_,_,tvPant,tvStripe,tvPant,_,_,_],
+  [_,_,_,_,tvPant,tvStripe,tvPant,_,_,_],
+  [_,_,_,tvPant,tvStripe,tvPant,_,_,_,_],
+  [_,_,_,tvPant,tvStripe,tvPant,_,_,_,_],
+  [_,_,_,tvBoot,tvBoot,tvBoot,tvBoot,_,_,_],
+]
+
 // ---- FORT WOOD WALL ----
 const sltC = '#c6ac99'   // cap
 const sltM = '#554132'   // face 
@@ -320,6 +415,17 @@ const sltD = '#503b2d'   // gap
 export const WOOD_WALL: Sprite = [
   [sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC],
   [sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC,sltC],
+  [sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD],
+  [sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD],
+  [sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD],
+  [sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD],
+  [sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD],
+  [sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD],
+  [sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD],
+  [sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD],
+  [sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD],
+  [sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD],
+  [sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD],
   [sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD],
   [sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD],
   [sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD,sltM,sltM,sltM,sltM,sltD],
@@ -350,6 +456,16 @@ export const WOOD_WALL_HALF: Sprite = [
   [sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM],
   [sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM],
   [sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM,sltM],
 ]
 
 // Vertical wood wall 
@@ -362,6 +478,17 @@ export const WOOD_WALL_V: Sprite = [
   [sltC,sltC,sltC,sltC,sltC,sltC],
   [sltC,sltC,sltC,sltC,sltC,sltC],
   [sltC,sltC,sltC,sltC,sltC,sltC],
+  [sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM],
+  [sltM,sltM,sltM,sltM,sltM,sltM],
   [sltM,sltM,sltM,sltM,sltM,sltM],
   [sltM,sltM,sltM,sltM,sltM,sltM],
   [sltM,sltM,sltM,sltM,sltM,sltM],
@@ -428,6 +555,94 @@ export const GRAVE_CROSS: Sprite = [
   [_,_,_,gC,gCd,_,_,_],
   [_,_,_,gC,gCd,_,_,_],
   [_,_,gCs,gCs,gCs,gCs,_,_],
+]
+
+export const TRAIL_SIGN: Sprite = [
+  [_,_,gC,gC,gC,gC,gC,gC,gC,_,_],
+  [_,gC,gC,gC,gC,gC,gC,gC,gC,gC,_],
+  [_,gC,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gC,_],
+  [_,gC,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gC,_],
+  [_,gC,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gC,_],
+  [_,gC,gC,gC,gC,gC,gC,gC,gC,gC,_],
+  [_,_,gC,gC,gC,gC,gC,gC,gC,_,_],
+  [_,_,_,_,gC,gC,gC,_,_,_,_],
+  [_,_,_,_,gC,gCd,gC,_,_,_,_],
+  [_,_,_,_,gC,gCd,gC,_,_,_,_],
+  [_,_,_,_,gC,gCd,gC,_,_,_,_],
+  [_,_,_,_,gC,gCd,gC,_,_,_,_],
+  [_,_,_,gCs,gCs,gCs,gCs,gCs,_,_,_],
+]
+
+export const CROSSROADS_SIGN: Sprite = [
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [gC,gC,gC,gC,gC,gC,gC,gC,gCd,gC,gC,gC,gC,gC,gC,gC,gC],
+  [gC,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gC],
+  [gC,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gC],
+  [gC,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gCd,gC],
+  [gC,gC,gC,gC,gC,gC,gC,gC,gCd,gC,gC,gC,gC,gC,gC,gC,gC],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,_,gC,gCd,gC,_,_,_,_,_,_,_],
+  [_,_,_,_,_,_,gCs,gCs,gCs,gCs,gCs,_,_,_,_,_,_],
+]
+
+const wCv = '#e7d4a8'
+const wCvD = '#c9b485'
+const wCvS = '#8a7550'
+const wWd = '#6b4a2b'
+const wWdD = '#442a15'
+const wWhl = '#3a2515'
+const wWhlS = '#221208'
+
+export const WAGON_DOWNED: Sprite = [
+  [_,_,_,_,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,_,_,_,_],
+  [_,_,_,wCvS,wCv,wCv,wCv,wCv,wCv,wCv,wCv,wCv,wCv,wCv,wCvS,_,_,_],
+  [_,_,wCvS,wCv,wCv,wCvD,wCv,wCv,wCvD,wCvD,wCv,wCv,wCvD,wCv,wCv,wCvS,_,_],
+  [_,wCvS,wCv,wCv,wCvD,wCvD,wCv,wCv,wCvD,wCvD,wCv,wCv,wCvD,wCvD,wCv,wCv,wCvS,_],
+  [wCvS,wCv,wCv,wCvD,wCvD,wCv,wCv,wCvD,wCvD,wCv,wCv,wCvD,wCvD,wCv,wCv,wCv,wCv,wCvS],
+  [wCvS,wCv,wCvD,wCvD,wCv,wCv,wCvD,wCvD,wCv,wCv,wCvD,wCvD,wCv,wCv,wCv,wCvD,wCv,wCvS],
+  [wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS,wCvS],
+  [wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd],
+  [wWd,wWdD,wWdD,wWd,wWd,wWdD,wWdD,wWd,wWd,wWdD,wWdD,wWd,wWd,wWdD,wWdD,wWd,wWd,wWd],
+  [wWd,wWdD,wWdD,wWd,wWd,wWdD,wWdD,wWd,wWd,wWdD,wWdD,wWd,wWd,wWdD,wWdD,wWd,wWd,wWd],
+  [wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd,wWd],
+  [_,wWhl,wWhl,wWhl,_,_,_,_,_,_,_,_,_,_,wWhl,wWhl,wWhl,_],
+  [wWhl,wWhlS,wWhlS,wWhl,_,_,_,_,_,_,_,_,_,wWhl,wWhlS,wWhlS,wWhl,_],
+  [wWhl,wWhlS,wWhlS,wWhl,_,_,_,_,_,_,_,_,_,wWhl,wWhlS,wWhlS,wWhl,_],
+  [_,wWhl,wWhl,wWhl,_,_,_,_,_,_,_,_,_,_,wWhl,wWhl,wWhl,_],
+]
+
+const mmS = '#5a3820'
+const mmM = '#8a5c38'
+const mmL = '#a37850'
+const mmC = '#3a2010'
+
+export const MUMMIFIED_BODY: Sprite = [
+  [_,_,_,mmS,mmS,mmS,_,_,_,_,_,_,_,_,_],
+  [_,_,mmS,mmM,mmL,mmM,mmS,_,_,_,_,_,_,_,_],
+  [_,mmS,mmM,mmC,mmL,mmC,mmM,mmS,_,_,_,_,_,_,_],
+  [_,mmS,mmM,mmL,mmM,mmL,mmM,mmS,_,_,_,_,_,_,_],
+  [_,_,mmS,mmS,mmM,mmS,mmS,mmM,mmS,mmS,_,_,_,_,_],
+  [_,_,_,mmS,mmM,mmM,mmL,mmL,mmM,mmS,mmS,_,_,_,_],
+  [_,_,_,mmS,mmM,mmL,mmL,mmM,mmL,mmL,mmM,mmS,_,_,_],
+  [_,_,_,mmS,mmM,mmM,mmL,mmL,mmM,mmL,mmL,mmM,mmS,_,_],
+  [_,_,_,_,mmS,mmM,mmM,mmS,mmS,mmM,mmM,mmS,mmS,_,_],
+  [_,_,_,_,_,mmS,mmS,_,_,mmS,mmS,mmM,mmS,mmS,_],
+  [_,_,_,_,_,_,_,_,_,_,mmS,mmS,mmS,mmS,_],
 ]
 
 // ---- WORKSHOP (smithy) ----
@@ -504,22 +719,23 @@ export const ITEM_FLOUR: Sprite = [
 ]
 
 // Bread
-const bC = '#97623a'   // crust
-const bI = '#cea579'   // interior crumb
-const bD = '#c69c70'   // dark crust line
-const bF = '#deb282'   
+const bC = '#c57d47'   // crust
+const bB = '#7d502e'   // shadow
+const bF = '#f4c991'   // inside
 
 export const ITEM_BREAD: Sprite = [
-  [_,bC,bC,bC,bC,bC,bC,bC,bC,bC,bC,bC,bC,bC,_],
-  [bC,bF,bF,bF,bF,bF,bF,bF,bF,bF,bF,bF,bF,bF,bC],
-  [bC,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bC],
-  [bC,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bC],
-  [bC,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bC],
-  [bC,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bI,bC],
-  [_,bC,bD,bD,bD,bD,bD,bD,bD,bD,bD,bD,bD,bC,_],
-  [_,bC,bD,bD,bD,bD,bD,bD,bD,bD,bD,bD,bD,bC,_],
-  [_,bC,bD,bD,bD,bD,bD,bD,bD,bD,bD,bD,bD,bC,_],
-  [_,_,bC,bC,bC,bC,bC,bC,bC,bC,bC,bC,bC,_,_],
+  [_,_,_,bB,bB,bB,bB,bB,bB,bB,bB,bB,_,_,_],
+  [_,bB,bC,bC,bC,bC,bC,bC,bC,bC,bC,bC,bC,bB,_],
+  [bB,bC,bC,bC,bC,bC,bC,bC,bC,bC,bC,bC,bC,bC,bB],
+  [bB,bC,bB,bB,bC,bC,bC,bC,bC,bC,bC,bC,bC,bF,bB],
+  [bB,bC,bB,bB,bB,bB,bB,bC,bC,bC,bC,bC,bF,bF,bB],
+  [bB,bC,bB,bB,bB,bB,bB,bB,bB,bB,bB,bF,bF,bF,bB],
+  [bB,bC,bC,bB,bB,bB,bB,bB,bB,bB,bF,bF,bF,bB,_],
+  [_,bB,bC,bB,bB,bB,bB,bB,bB,bF,bF,bF,bF,bB,_],
+  [_,_,bB,bC,bB,bB,bB,bB,bB,bF,bF,bF,bB,_,_],
+  [_,_,_,bB,bC,bC,bC,bC,bF,bF,bF,bB,_,_,_],
+  [_,_,_,_,_,bB,bB,bC,bF,bB,bB,_,_,_,_],
+  [_,_,_,_,_,_,_,bB,bB,_,_,_,_,_,_],
 ]
 
 // Snake oil
@@ -577,6 +793,32 @@ export const ITEM_WIDOWER: Sprite = [
   [_,_,wdG,wdG,wdG,wdG,wdG,_,_,_],
 ]
 
+const whK = '#8a5a32'
+const whA = '#7a4a1e'
+const whL = '#d99a4a'
+const whD = '#3a1e0c'
+const whP = '#f2e6c8'
+const whR = '#d4c199'
+export const ITEM_WHISKEY: Sprite = [
+  [_,_,_,whK,whK,whK,_,_,_,_],
+  [_,_,_,whK,whK,whK,_,_,_,_],
+  [_,_,_,whA,whA,whA,_,_,_,_],
+  [_,_,_,whL,whA,whA,_,_,_,_],
+  [_,_,whA,whL,whA,whA,whA,_,_,_],
+  [whA,whL,whD,whD,whD,whD,whD,whA,whA,_],
+  [whA,whL,whD,whD,whD,whD,whD,whA,whA,_],
+  [whA,whL,whD,whD,whD,whD,whD,whA,whA,_],
+  [whA,whP,whP,whP,whP,whP,whP,whP,whA,_],
+  [whA,whP,whR,whR,whR,whR,whR,whP,whA,_],
+  [whA,whP,whR,whR,whR,whP,whR,whR,whA,_],
+  [whA,whR,whP,whP,whP,whR,whP,whP,whA,_],
+  [whA,whP,whP,whP,whP,whP,whP,whP,whA,_],
+  [whA,whL,whD,whD,whD,whD,whD,whD,whA,_],
+  [whA,whL,whD,whD,whD,whD,whD,whD,whA,_],
+  [whA,whL,whD,whD,whD,whD,whD,whD,whA,_],
+  [whA,whA,whD,whD,whD,whD,whD,whA,whA,_],
+  [_,whA,whA,whA,whA,whA,whA,whA,_,_],
+]
 
 // ---- CHURCH ---- 
 const shL = '#D6B97A'   // adobe light
@@ -1004,6 +1246,33 @@ export const STORAGE: Sprite = [
   [_,stMt,stMt,stMt,stMt,stMt,stDr,stDr,stDr,stDr,stMt,stMt,stMt,stMt,stMt,_],
   [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_],
 ]
+
+const dpWd = '#5C3A1E'
+const dpWl = '#7A5030'
+const dpRf = '#3A2010'
+const dpFl = '#9E8060'
+const dpPl = '#6B4A2E'
+const dpCr = '#8B6840'
+const dpCs = '#6E5030'
+export const DEPOT: Sprite = [
+  [_,_,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,_,_],
+  [_,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,dpRf,_],
+  [_,dpWd,dpWl,dpWd,dpWl,dpWd,dpWl,dpWd,dpWl,dpWd,dpWl,dpWd,dpWl,dpWd,dpWd,_],
+  [_,dpWd,dpWl,dpWd,dpWl,dpWd,dpWl,dpWd,dpWl,dpWd,dpWl,dpWd,dpWl,dpWd,dpWd,_],
+  [_,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,_],
+  [_,dpWd,dpWl,dpWd,dpCr,dpCr,dpWd,dpWl,dpWd,dpWl,dpCr,dpCr,dpWd,dpWl,dpWd,_],
+  [_,dpWd,dpWd,dpWd,dpCs,dpCr,dpWd,dpWd,dpWd,dpWd,dpCs,dpCr,dpWd,dpWd,dpWd,_],
+  [_,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,_],
+  [_,dpWd,dpWl,dpWd,dpWl,dpWd,dpWl,dpWd,dpWl,dpWd,dpWl,dpWd,dpWl,dpWd,dpWd,_],
+  [_,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,dpWd,_],
+  [_,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,_],
+  [_,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,_],
+  [_,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,_],
+  [_,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,dpFl,_],
+  [_,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,dpPl,_],
+  [_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_],
+]
+
 const smSt = '#6E6E6E'
 const smSd = '#4A4A4A'
 const smBk = '#8B3A1A'
@@ -1401,7 +1670,7 @@ export const FLOOR_WOOD: Sprite = [
 ]
 
 // ---- FLOOR BORDER TILE ----
-const fbD = '#533725'   // dark trim
+const fbD = '#57351f'   // dark trim
 const fbM = '#7e472d'   // mid trim
 const fbL = '#a5754e'   // light trim / diamond highlight
 const fbA = '#794835'   // matches wfA so border blends into floor near edge
@@ -1608,58 +1877,66 @@ const pwL = '#bc8b4f'   // light wood
 const pwM = '#a26c3a'   // wood pattern
 const pwB = '#663326'   // shadow band on seat back
 const pwC = '#53351c'   // darker shadow
+const drN = '#3d2117'
 
 const PEW: Sprite = [
-  [drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS],
-  [drS,pwM,pwM,drS,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,drS,pwM,pwM,drS],
-  [drS,pwM,pwM,drS,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,drS,pwM,pwM,drS],
-  [drS,pwL,pwL,drS,pwL,pwL,pwM,pwM,pwM,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwM,pwM,pwM,pwL,pwL,drS,pwL,pwL,drS],
-  [drS,pwL,pwL,drS,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,drS,pwL,pwL,drS],
-  [drS,pwM,pwM,drS,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,drS,pwM,pwM,drS],
-  [drS,pwM,pwM,drS,pwL,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwL,drS,pwM,pwM,drS],
-  [drS,pwM,pwM,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,pwM,pwM,drS],
-  [drS,pwM,pwM,drS,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,drS,pwM,pwM,drS],
-  [drS,pwL,pwL,drS,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,drS,pwL,pwL,drS],
-  [drS,pwL,pwL,drS,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,drS,pwL,pwL,drS],
-  [drS,pwB,pwB,drS,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,drS,pwB,pwB,drS],
-  [drS,pwB,pwB,drS,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,drS,pwB,pwB,drS],
-  [drS,pwB,pwB,drS,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,drS,pwB,pwB,drS],
-  [drS,pwB,pwB,drS,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,drS,pwB,pwB,drS],
-  [drS,pwB,pwB,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,pwC,pwC,drS],
-  [drS,pwC,pwC,drS,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,drS,pwC,pwC,drS],
+  [drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN],
+  [drN,pwM,pwM,drN,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,drN,pwM,pwM,drN],
+  [drN,pwM,pwM,drN,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,drN,pwM,pwM,drN],
+  [drN,pwL,pwL,drN,pwL,pwL,pwM,pwM,pwM,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwM,pwM,pwM,pwL,pwL,drN,pwL,pwL,drN],
+  [drN,pwL,pwL,drN,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,drN,pwL,pwL,drN],
+  [drN,pwM,pwM,drN,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,drN,pwM,pwM,drN],
+  [drN,pwM,pwM,drN,pwL,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwL,drN,pwM,pwM,drN],
+  [drN,pwM,pwM,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,pwM,pwM,drN],
+  [drN,pwM,pwM,drN,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,pwM,drN,pwM,pwM,drN],
+  [drN,pwL,pwL,drN,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,drN,pwL,pwL,drN],
+  [drN,pwL,pwL,drN,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,pwL,drN,pwL,pwL,drN],
+  [drN,pwB,pwB,drN,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,drN,pwB,pwB,drN],
+  [drN,pwB,pwB,drN,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,drN,pwB,pwB,drN],
+  [drN,pwB,pwB,drN,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,drN,pwB,pwB,drN],
+  [drN,pwB,pwB,drN,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,pwB,drN,pwB,pwB,drN],
+  [drN,pwB,pwB,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,pwC,pwC,drN],
+  [drN,pwC,pwC,drN,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,pwC,drN,pwC,pwC,drN],
   [drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS],
   [drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS],
   [drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS],
 ]
 
 // Chest
-const cstL = '#9C7248'   // light plank
-const cstM = '#8B5A2B'   // mid plank
-const cstD = '#4A3318'   // dark outline / batten shadow
+const cstL = '#a9624f'   // light plank
+const cstM = '#6a2a1d'   // mid plank
+const cstD = '#302920'   // dark outline / batten shadow
+const cstG = '#994f2c'
+
 export const ITEM_CHEST: Sprite = [
-  [cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD],
-  [cstD,cstM,cstL,cstM,cstM,cstL,cstM,cstD,cstD,cstM,cstL,cstM,cstM,cstL,cstM,cstD],
-  [cstD,cstL,cstD,cstM,cstM,cstD,cstL,cstD,cstD,cstL,cstD,cstM,cstM,cstD,cstL,cstD],
-  [cstD,cstM,cstM,cstD,cstD,cstM,cstM,cstD,cstD,cstM,cstM,cstD,cstD,cstM,cstM,cstD],
-  [cstD,cstM,cstM,cstD,cstD,cstM,cstM,cstD,cstD,cstM,cstM,cstD,cstD,cstM,cstM,cstD],
-  [cstD,cstL,cstD,cstM,cstM,cstD,cstL,cstD,cstD,cstL,cstD,cstM,cstM,cstD,cstL,cstD],
-  [cstD,cstM,cstL,cstM,cstM,cstL,cstM,cstD,cstD,cstM,cstL,cstM,cstM,cstL,cstM,cstD],
-  [cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD],
+  [drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN],
+  [drN,cstD,cstG,cstG,cstG,cstG,cstG,cstG,cstG,cstG,cstG,cstG,cstG,cstG,cstG,cstD,drN],
+  [drN,cstG,cstG,cstG,cstG,cstG,cstG,cstG,cstG,cstG,cstG,cstG,cstG,cstG,cstG,cstG,drN],
+  [drN,cstL,cstL,cstL,cstL,cstL,cstL,cstL,cstL,cstL,cstL,cstL,cstL,cstL,cstL,cstL,drN],
+  [drN,cstM,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstD,cstM,drN],
+  [drN,cstM,cstM,cstM,cstM,cstM,cstM,cstD,drS,cstD,cstM,cstM,cstM,cstM,cstM,cstM,drN],
+  [drN,cstD,cstM,cstD,cstM,cstM,cstM,cstM,cstD,cstM,cstM,cstM,cstM,cstD,cstM,cstD,drN],
+  [drN,cstM,cstM,cstD,cstM,cstM,cstM,cstM,cstD,cstM,cstM,cstM,cstM,cstD,cstM,cstM,drN],
+  [drN,cstD,cstM,cstD,cstM,cstM,cstM,cstM,cstM,cstM,cstM,cstM,cstM,cstD,cstM,cstD,drN],
+  [drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN,drN],
+  [drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS,drS],
 ]
 
 // Crate 
-const crL = '#9C7248'   // light plank
-const crM = '#8B5A2B'   // mid plank
-const crD = '#4A3318'   // dark outline / batten shadow
+const crL = '#a9624f'   // light plank
+const crM = '#6a2a1d'  // mid plank
+const crC = '#623319'   // mid shadow
+const crD = '#3f2015'   // dark outline / batten shadow
 export const ITEM_CRATE: Sprite = [
   [crD,crD,crD,crD,crD,crD,crD,crD],
-  [crD,crM,crL,crM,crM,crL,crM,crD],
-  [crD,crL,crD,crM,crM,crD,crL,crD],
-  [crD,crM,crM,crD,crD,crM,crM,crD],
-  [crD,crM,crM,crD,crD,crM,crM,crD],
-  [crD,crL,crD,crM,crM,crD,crL,crD],
-  [crD,crM,crL,crM,crM,crL,crM,crD],
+  [crD,cstG,crC,cstG,cstG,crC,cstG,crD],
+  [crD,cstG,crC,cstG,cstG,crC,cstG,crD],
+  [crD,crL,crC,crL,crL,crC,crL,crD],
+  [crD,crM,crD,crM,crM,crD,crM,crD],
+  [crD,crM,crD,crM,crM,crD,crM,crD],
+  [crD,crM,crD,crM,crM,crD,crM,crD],
   [crD,crD,crD,crD,crD,crD,crD,crD],
+  [drS,drS,drS,drS,drS,drS,drS,drS],
 ]
 
 // Silver lockbox
@@ -2431,10 +2708,10 @@ export const ITEM_HEMP_SEED: Sprite = [
 
 // Post: weathered wooden hitching post, H-shape. Same art as the item icon
 // so the placed object reads identical to what's in your inventory. 8x8.
-const psL = '#9A7A52'   // wood light (sunlit side)
-const psM = '#6B4F30'   // wood mid (main)
+const psL = '#916e42'   // wood light (sunlit side)
+const psM = '#684329'   // wood mid (main)
 const psD = '#3F2C18'   // wood dark (shadow / grain)
-const psG = '#1A1208'   // deepest shadow / knothole
+const psG = '#3c2313'   // deepest shadow / knothole
 export const POST: Sprite = [
   [_,psM,_,_,_,_,psM,_],
   [psM,psL,psM,_,_,psM,psL,psM],
@@ -2555,19 +2832,6 @@ export const CEDAR_POST_V: Sprite = [
   [_,_,_,fcM,fcG,_,_,_],
 ]
 
-// Wood
-export const ITEM_WOOD: Sprite = [
-  [_,_,_,_,_,_,_,_,_,_,_,_],
-  [_,_,_,_,_,_,_,_,_,_,_,_],
-  [psD,psM,psM,psM,psM,psM,psM,psM,psM,psM,psM,psD],
-  [psM,psL,psL,psG,psL,psL,psL,psL,psG,psL,psM,psM],
-  [psM,psL,psL,psL,psL,psG,psL,psL,psL,psL,psG,psM],
-  [psM,psL,psL,psL,psL,psL,psL,psG,psL,psL,psL,psM],
-  [psD,psM,psM,psM,psM,psM,psM,psM,psM,psM,psM,psD],
-  [psD,psM,psM,psM,psM,psM,psM,psM,psM,psM,psM,psD],
-  [_,_,_,_,_,_,_,_,_,_,_,_],
-]
-
 // Plank
 const plL = '#d1b281'   // plank light (sunlit board face)
 const plM = '#bb9967'   // plank mid (main)
@@ -2587,21 +2851,34 @@ export const ITEM_PLANK: Sprite = [
   [plD,plM,plM,plM,plM,plM,plM,plM,plM,plM,plM,plD],
 ]
 
+// Wood
+export const ITEM_WOOD: Sprite = [
+  [_,_,_,_,_,_,_,_,psG,psG,psG,_,_],
+  [_,_,_,_,psM,psM,psM,psM,psM,psM,psM,psG,_],
+  [_,psD,psM,psM,psM,psM,psM,psL,psM,psG,psM,psM,psG],
+  [psM,psM,psL,psM,psG,psL,psL,psL,psL,psG,psL,psM,psG],
+  [psM,plM,plM,plM,psM,psL,psG,psL,psL,psL,psL,psG,psG],
+  [psM,plM,plM,plM,plM,psM,psL,psL,psG,psL,psM,psG,_],
+  [psM,plM,plM,plM,plM,psM,psM,psM,psG,psG,psG,_,_],
+  [_,psM,plM,plM,plM,psG,psG,psG,psG,_,_,_,_],
+  [_,_,psD,psD,psG,_,_,_,_,_,_,_,_],
+]
+
 // Flagstone: floor tile. 12x12.
 const stM = '#52493c'   // stone (single fill, matches rock mid rkM)
 const rk = '#7d7161'
 
 export const ITEM_FLAGSTONE: Sprite = [
-  [stM,stM,stM,stM,stM,stM,stM,stM,stM,stM,rk,stM],
-  [stM,stM,stM,stM,stM,stM,stM,stM,stM,stM,rk,rk],
-  [stM,stM,stM,stM,stM,stM,stM,stM,stM,stM,rk,rk],
-  [stM,stM,stM,stM,stM,stM,stM,stM,stM,stM,rk,rk],
-  [stM,stM,stM,stM,stM,stM,stM,stM,stM,stM,rk,rk],
-  [stM,stM,stM,stM,stM,stM,stM,stM,stM,stM,rk,rk],
-  [stM,stM,stM,stM,stM,stM,stM,stM,stM,stM,rk,rk],
-  [stM,stM,stM,stM,stM,stM,stM,stM,stM,stM,rk,rk],
-  [stM,stM,stM,stM,stM,stM,stM,stM,stM,stM,rk,rk],
-  [stM,stM,stM,stM,stM,stM,stM,stM,stM,stM,rk,rk],
+  [stM,stM,stM,stM,rk,stM,stM,stM,rk,stM,rk,stM],
+  [stM,stM,stM,stM,rk,stM,stM,stM,rk,stM,rk,rk],
+  [stM,stM,stM,stM,rk,stM,rk,rk,stM,stM,rk,rk],
+  [stM,stM,stM,rk,rk,stM,stM,stM,stM,stM,rk,rk],
+  [rk,rk,rk,stM,stM,rk,stM,stM,stM,stM,rk,rk],
+  [stM,rk,stM,stM,stM,rk,stM,stM,stM,stM,rk,rk],
+  [rk,stM,stM,stM,stM,rk,stM,stM,stM,stM,rk,rk],
+  [stM,stM,stM,rk,rk,stM,stM,stM,rk,stM,rk,rk],
+  [stM,stM,stM,rk,stM,stM,stM,stM,rk,stM,rk,rk],
+  [stM,stM,stM,rk,stM,stM,stM,rk,stM,stM,rk,rk],
   [rk,rk,rk,rk,rk,rk,rk,rk,rk,rk,rk,rk],
   [stM,rk,rk,rk,rk,rk,rk,rk,rk,rk,rk,_],
 ]
@@ -2677,7 +2954,7 @@ export const FENCE_GATE_OPEN: Sprite = [
 ]
 
 // ---- BRUSH GROUND ---- 8x8 ground tile
-const brL = '#adbc3d'   // brush light
+const brL = '#b2c13d'   // brush light
 const brD = '#7c8f38'   // brush dark speck 
 export const BRUSH_GROUND: Sprite = [
   [brL,brL,brL,brL,brL,brL,brL,brL],
@@ -2692,8 +2969,8 @@ export const BRUSH_GROUND: Sprite = [
 
 // Sandy yellow-tan path dirt. Same 8x8 footprint as BRUSH_GROUND so it tiles
 // the terrain grid identically; stamped where a trail crosses grass.
-const pdL = '#ffe063'   // sandy light
-const pdD = '#f3d660'   // sandy dark speck
+const pdL = '#efd776'   // sandy light
+const pdD = '#e8d173'   // sandy dark speck
 export const PATH_DIRT: Sprite = [
   [pdL,pdL,pdL,pdL,pdL,pdL,pdL,pdL],
   [pdL,pdL,pdL,pdD,pdL,pdL,pdL,pdL],
@@ -3639,10 +3916,15 @@ export const ALL_SPRITES: Record<string, Sprite> = {
   bush: BUSH,
   rock_small: ROCK_SMALL,
   grave_cross: GRAVE_CROSS,
+  trail_sign: TRAIL_SIGN,
+  crossroads_sign: CROSSROADS_SIGN,
+  wagon_downed: WAGON_DOWNED,
+  mummified_body: MUMMIFIED_BODY,
   workshop: WORKSHOP,
   workshop_l2: WORKSHOP_L2,
   field: FIELD,
   storage: STORAGE,
+  depot: DEPOT,
   smelter: SMELTER,
   blast_furnace: BLAST_FURNACE,
   shop: SHOP,
@@ -3659,8 +3941,13 @@ export const ALL_SPRITES: Record<string, Sprite> = {
   church_bell_back: CHURCH_BELL_BACK,
   player: PLAYER,
   player_hurt: PLAYER_HURT,
+  bullet: BULLET,
+  miner: MINER,
   cavalry_trooper: CAVALRY_TROOPER,
+  cavalry_trooper_leaning: CAVALRY_TROOPER_LEANING,
+  cavalry_trooper_upright: CAVALRY_TROOPER_UPRIGHT,
   cavalry_trooper_step: CAVALRY_TROOPER_STEP,
+  cavalry_trooper_mounted: CAVALRY_TROOPER_MOUNTED,
   wood_wall: WOOD_WALL,
   wood_wall_v: WOOD_WALL_V,
   wood_wall_half: WOOD_WALL_HALF,
@@ -3675,6 +3962,11 @@ export const ALL_SPRITES: Record<string, Sprite> = {
   heart_const_half: HEART_CONST_HALF,
   heart_const_1q: HEART_CONST_1Q,
   heart_const_empty: HEART_CONST_EMPTY,
+  heart_temp_full: HEART_TEMP_FULL,
+  heart_temp_3q: HEART_TEMP_3Q,
+  heart_temp_half: HEART_TEMP_HALF,
+  heart_temp_1q: HEART_TEMP_1Q,
+  heart_temp_empty: HEART_TEMP_EMPTY,
   arrow_right: ARROW_RIGHT,
   cow_skull: COW_SKULL,
   yucca: YUCCA,
@@ -3684,6 +3976,8 @@ export const ALL_SPRITES: Record<string, Sprite> = {
   item_bread: ITEM_BREAD,
   item_snake_oil: ITEM_SNAKE_OIL,
   item_widower: ITEM_WIDOWER,
+  item_tobacco: ITEM_WIDOWER,
+  item_whiskey: ITEM_WHISKEY,
   item_shovel: ITEM_SHOVEL,
   item_axe: ITEM_AXE,
   item_pickaxe: ITEM_PICKAXE,

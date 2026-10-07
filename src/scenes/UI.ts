@@ -27,8 +27,8 @@ const PICKUP_TOAST_BOTTOM_PAD = 100
 const PICKUP_TOAST_ICON_GAP = 10
 const PICKUP_TOAST_DEPTH = 300
 
-function heartSpriteForFill(fill: number, kind: 'heal' | 'const' = 'heal'): string {
-  const p = kind === 'const' ? 'heart_const_' : 'heart_'
+function heartSpriteForFill(fill: number, kind: 'heal' | 'const' | 'temp' = 'heal'): string {
+  const p = kind === 'const' ? 'heart_const_' : kind === 'temp' ? 'heart_temp_' : 'heart_'
   return fill >= 1 ? `${p}full`
     : fill >= 0.75 ? `${p}3q`
     : fill >= 0.5 ? `${p}half`
@@ -44,6 +44,8 @@ function statLinesFor(def: ItemDef): string[] {
   if (def.chopping != null) lines.push(`Chopping ${def.chopping}`)
   if (def.digging != null) lines.push(`Digging ${def.digging}`)
   if (def.combat != null) lines.push(`Combat ${def.combat}`)
+  if (def.maxHeartsBonus != null) lines.push('Permanently increases constitution.')
+  if (def.tempHeartsBonus != null) lines.push('Temporarily boosts constitution.')
   return lines
 }
 
@@ -267,11 +269,10 @@ export class UI extends Phaser.Scene {
 
     const heartsStartX = this.goldAmountText.x + this.goldAmountText.width + 34
     const addHeart = (i: number) => {
-      const inCombat = (this.registry.get('inCombat') as boolean | undefined) ?? false
       const heart = this.add.sprite(heartsStartX + i * 28, BAR_HEIGHT / 2, 'heart_full')
         .setOrigin(0, 0.5)
         .setScale(3)
-        .setVisible(inCombat)
+        .setVisible(state.heartsRevealed)
       this.hearts.push(heart)
     }
     const initialMax = (this.registry.get('playerMaxHealth') as number | undefined) ?? BASE_MAX_HEALTH
@@ -281,11 +282,17 @@ export class UI extends Phaser.Scene {
     this.registry.events.on('changedata-playerMaxHealth', (_p: unknown, value: number) => {
       const gained = value > this.hearts.length
       while (this.hearts.length < value) addHeart(this.hearts.length)
+      while (this.hearts.length > value) {
+        const h = this.hearts.pop()
+        if (h) h.destroy()
+      }
       this.refreshHearts()
       if (gained) this.flashHearts()
     })
-    this.registry.events.on('changedata-inCombat', (_p: unknown, value: boolean) => {
-      for (const h of this.hearts) h.setVisible(value)
+    this.registry.events.on('changedata-inCombat', () => {
+      if (state.heartsRevealed) {
+        for (const h of this.hearts) h.setVisible(true)
+      }
     })
 
 
@@ -329,7 +336,7 @@ export class UI extends Phaser.Scene {
       .setDepth(INSPECT_DEPTH + 4).setVisible(false)
     // Pool of stat lines (Mining, Combat, …). Sized to the max stats any item
     // can show; statLinesFor() decides how many are populated per item.
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 3; i++) {
       this.inspectStats.push(
         this.add.bitmapText(0, 0, 'main', '', FONT.desc)
           .setTint(COLORS.statText).setDepth(INSPECT_DEPTH + 4).setVisible(false),
@@ -612,8 +619,7 @@ export class UI extends Phaser.Scene {
       repeat: 7,
       callback: () => {
         if (event.repeatCount === 0) {
-          const inCombat = (this.registry.get('inCombat') as boolean | undefined) ?? false
-          for (const h of this.hearts) h.setVisible(inCombat)
+          for (const h of this.hearts) h.setVisible(state.heartsRevealed)
         } else {
           on = !on
           for (const h of this.hearts) h.setVisible(on)
@@ -839,7 +845,7 @@ export class UI extends Phaser.Scene {
       .setBlendMode(Phaser.BlendModes.MULTIPLY)
     const main = this.add.bitmapText(0, 0, 'everyday', text, 14)
       .setOrigin(0, 0.5)
-      .setTint(COLORS.uiText)
+      .setTint(0xFFFFFF)
     return this.add.container(0, 0, [shadow, main])
   }
 
@@ -956,6 +962,7 @@ export class UI extends Phaser.Scene {
   isInteractMenuOpen(): boolean { return this.interactMenuVisible }
 
   isDialogueOpen(): boolean { return this.dialogueBox.isOpen() }
+  dialogueInputConsumed(): boolean { return this.dialogueBox.inputConsumedByClose() }
 
   advanceDialogue() { this.dialogueBox.advance() }
 
@@ -1019,7 +1026,7 @@ export class UI extends Phaser.Scene {
       .setBlendMode(Phaser.BlendModes.MULTIPLY)
     const titleMain = this.add.bitmapText(0, 0, 'everyday', def.name, 14)
       .setOrigin(1, 0.5)
-      .setTint(COLORS.uiText)
+      .setTint(0xFFFFFF)
 
     // Item sprite uses the item's own scale (matches hotbar/crate rendering).
     // x is set in applyPickupToastText once we know the title width.
@@ -1157,8 +1164,9 @@ export class UI extends Phaser.Scene {
     }
 
     const constBonus = def.maxHeartsBonus ?? 0
-    const healAmount = constBonus > 0 ? constBonus : (def.healFull ? BASE_MAX_HEALTH : (def.healHearts ?? 0))
-    const heartKind: 'heal' | 'const' = constBonus > 0 ? 'const' : 'heal'
+    const tempBonus = def.tempHeartsBonus ?? 0
+    const healAmount = constBonus > 0 ? constBonus : tempBonus > 0 ? tempBonus : (def.healFull ? BASE_MAX_HEALTH : (def.healHearts ?? 0))
+    const heartKind: 'heal' | 'const' | 'temp' = constBonus > 0 ? 'const' : tempBonus > 0 ? 'temp' : 'heal'
     const heartCount = healAmount > 0 ? Math.ceil(healAmount) : 0
     const heartsW = heartCount > 0
       ? NAME_HEART_GAP + heartCount * HEART_SIZE + (heartCount - 1) * HEART_GAP

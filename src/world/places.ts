@@ -5,20 +5,21 @@ import type { WorldStructureType } from './structures'
 type PostSpecies = 'post' | 'cedar_post' | 'iron_post' | 'wood_wall'
 
 export interface AuthoredPlace {
-  structures: { type: WorldStructureType; x: number; y: number; flipX?: boolean; sprite?: string; interior?: WorldStructureType }[]
+  structures: { type: WorldStructureType; x: number; y: number; flipX?: boolean; sprite?: string; interior?: WorldStructureType; midCount?: number; door?: { side: 'north' | 'south' | 'east' | 'west'; offset: number; questFlag?: string; exit?: { x: number; y: number } } }[]
   paths: { x1: number; y1: number; x2: number; y2: number; width: number }[]
   // Tilled-dirt regions painted to terrain at world load. Plowed fields.
   tilled?: { x1: number; y1: number; x2: number; y2: number }[]
   trees: { x: number; y: number }[]
-  troopers: { x: number; y: number; stationary: boolean; faceLeft?: boolean }[]
+  troopers: { x: number; y: number; stationary: boolean; faceLeft?: boolean; dialogue?: string; sprite?: string; graph?: string; npcId?: string }[]
   honses: { x: number; y: number; tame: boolean }[]
   troughs: { x: number; y: number; kind: TroughKind }[]
-  posts: { x: number; y: number; species: PostSpecies }[]
-  postRuns: { x1: number; y1: number; x2: number; y2: number; spacing: number; species: PostSpecies }[]
-  postBoxes: { x1: number; y1: number; x2: number; y2: number; spacing: number; species: PostSpecies }[]
+  posts: { x: number; y: number; species: PostSpecies; protected?: boolean }[]
+  postRuns: { x1: number; y1: number; x2: number; y2: number; spacing: number; species: PostSpecies; protected?: boolean }[]
+  postBoxes: { x1: number; y1: number; x2: number; y2: number; spacing: number; species: PostSpecies; skip?: { x: number; y: number }[]; protected?: boolean }[]
   gates: { x: number; y: number }[]
   solidDecor: { type: DecorType; x: number; y: number }[]
   decor: { sprite: string; x: number; y: number; scale: number; depth?: number }[]
+  lieutenants?: { x: number; y: number; safeZoneIndex: number; oneTime?: boolean; patrol?: { x: number; y: number }[] }[]
 }
 
 export const PLACES: Record<string, AuthoredPlace> = {
@@ -37,7 +38,35 @@ export const PLACES: Record<string, AuthoredPlace> = {
     troopers: [],
     honses: [],
     troughs: [],
-    posts: [],
+    posts: [
+      { x: 3280, y: 1070, species: 'post' },
+      { x: 3290, y: 1070, species: 'post' },
+      { x: 3330, y: 1070, species: 'post' },
+      { x: 3380, y: 1070, species: 'post' },
+      { x: 3410, y: 1070, species: 'post' },
+      { x: 2960, y: 220, species: 'post' },
+      { x: 2970, y: 220, species: 'post' },
+      { x: 2980, y: 220, species: 'post' },
+      { x: 2990, y: 220, species: 'post' },
+      { x: 3720, y: 1460, species: 'post' },
+      { x: 3730, y: 1460, species: 'post' },
+      { x: 3740, y: 1460, species: 'post' },
+      { x: 3750, y: 1460, species: 'post' },
+      { x: 3760, y: 1460, species: 'post' },
+      { x: 3770, y: 1460, species: 'post' },
+      { x: 3780, y: 1460, species: 'post' },
+      { x: 3720, y: 1470, species: 'post' },
+      { x: 3720, y: 1480, species: 'post' },
+      { x: 3720, y: 1490, species: 'post' },
+      { x: 3720, y: 1500, species: 'post' },
+      { x: 3720, y: 1510, species: 'post' },
+      { x: 3730, y: 1510, species: 'post' },
+      { x: 3740, y: 1510, species: 'post' },
+      { x: 3750, y: 1510, species: 'post' },
+      { x: 3760, y: 1510, species: 'post' },
+      { x: 3770, y: 1510, species: 'post' },
+      { x: 3780, y: 1510, species: 'post' },
+    ],
     postRuns: [],
     postBoxes: [],
     gates: [],
@@ -50,11 +79,14 @@ export const PLACES: Record<string, AuthoredPlace> = {
 
   fort_worth: {
     structures: [
+      { type: 'barracks', x: -51394, y: 1709, midCount: 3, door: { side: 'east', offset: 185, exit: { x: -51312, y: 1914 } } },
+      { type: 'barracks', x: -52096, y: 1649 },
       { type: 'land_office', x: -50911, y: 2920 },
       { type: 'general_store', x: -50692, y: 2667 },
       { type: 'house_roof', x: -51190, y: 2940 },
       { type: 'nursery', sprite: 'longhouse', x: -51183, y: 2724 },
       { type: 'gunsmith', sprite: 'longhouse', x: -51074, y: 2724 },
+      { type: 'sheriff_office', x: -50907, y: 2244 },
       { type: 'shop', sprite: 'longhouse', x: -51997, y: 2244 },
       { type: 'fw_charter_office', sprite: 'longhouse', x: -52123, y: 2244 },
       { type: 'house_roof', x: -51460, y: 2660 },
@@ -98,8 +130,9 @@ export const PLACES: Record<string, AuthoredPlace> = {
       { x: -50831, y: 2883 },
     ],
     troopers: [
-      { x: -52033, y: 1809, stationary: true },
-      { x: -52033, y: 1729, stationary: true },
+      { x: -52008, y: 1809, stationary: true, dialogue: 'Buenos dias, senor.' },
+      { x: -52008, y: 1729, stationary: true, dialogue: 'Good day.' },
+      { x: -51302, y: 1932, stationary: true, faceLeft: true, sprite: 'cavalry_trooper_leaning', graph: 'barracks_trooper', npcId: 'barracks_trooper' },
     ],
     honses: [],
     troughs: [],
@@ -272,6 +305,20 @@ export const PLACES: Record<string, AuthoredPlace> = {
     ],
     solidDecor: [],
     decor: [],
+    lieutenants: [
+      { x: -51333, y: 2279, safeZoneIndex: 1, oneTime: true, patrol: [
+        { x: -49513, y: 2183 },
+        { x: -49149, y: 1988 },
+        { x: -49372, y: 1209 },
+        { x: -52426, y: 1222 },
+        { x: -52877, y: 1956 },
+        { x: -54188, y: 2617 },
+        { x: -54001, y: 4427 },
+        { x: -51998, y: 4339 },
+        { x: -50774, y: 3692 },
+        { x: -49771, y: 2466 },
+      ] },
+    ],
   },
 
   west_pen: {
@@ -296,24 +343,33 @@ export const PLACES: Record<string, AuthoredPlace> = {
     posts: [
       { x: -52100, y: 1910, species: 'post' },
       { x: -52110, y: 1910, species: 'post' },
-      { x: -52176, y: 1440, species: 'wood_wall' },
-      { x: -51312, y: 1440, species: 'wood_wall' },
+      { x: -52176, y: 1440, species: 'wood_wall', protected: true },
+      { x: -51312, y: 1440, species: 'wood_wall', protected: true },
+      { x: -51768, y: 2064, species: 'wood_wall', protected: true },
+      { x: -51768, y: 2040, species: 'wood_wall', protected: true },
+      { x: -51768, y: 2016, species: 'wood_wall', protected: true },
+      { x: -51768, y: 1992, species: 'wood_wall', protected: true },
+      { x: -51744, y: 1992, species: 'wood_wall', protected: true },
+      { x: -51720, y: 1992, species: 'wood_wall', protected: true },
     ],
     postRuns: [
-      { x1: -52176, y1: 2064, x2: -51792, y2: 2064, spacing: 48, species: 'wood_wall' },
-      { x1: -51696, y1: 2064, x2: -51312, y2: 2064, spacing: 48, species: 'wood_wall' },
-      { x1: -52200, y1: 1440, x2: -51288, y2: 1440, spacing: 48, species: 'wood_wall' },
-      { x1: -52200, y1: 1440, x2: -52200, y2: 2064, spacing: 24, species: 'wood_wall' },
-      { x1: -51288, y1: 1440, x2: -51288, y2: 2064, spacing: 24, species: 'wood_wall' },
+      { x1: -52176, y1: 2064, x2: -51792, y2: 2064, spacing: 48, species: 'wood_wall', protected: true },
+      { x1: -51696, y1: 2064, x2: -51312, y2: 2064, spacing: 48, species: 'wood_wall', protected: true },
+      { x1: -52200, y1: 1440, x2: -51288, y2: 1440, spacing: 48, species: 'wood_wall', protected: true },
+      { x1: -51320, y1: 1600, x2: -51300, y2: 1600, spacing: 10, species: 'post', protected: true },
+      { x1: -52200, y1: 1440, x2: -52200, y2: 2064, spacing: 24, species: 'wood_wall', protected: true },
+      { x1: -51288, y1: 1440, x2: -51288, y2: 2064, spacing: 24, species: 'wood_wall', protected: true },
       { x1: -51860, y1: 2060, x2: -51860, y2: 1910, spacing: 10, species: 'post' },
       { x1: -51860, y1: 1910, x2: -52040, y2: 1910, spacing: 10, species: 'post' },
     ],
     postBoxes: [
-      { x1: -51230, y1: 1444, x2: -49800, y2: 2080, spacing: 10, species: 'post' },
+      { x1: -51230, y1: 1444, x2: -49800, y2: 2080, spacing: 10, species: 'post', skip: [{ x: -51180, y: 2080 }, { x: -51170, y: 2080 }, { x: -51160, y: 2080 }, { x: -51150, y: 2080 }, { x: -51140, y: 2080 }] },
     ],
     gates: [
       { x: -52080, y: 1910 },
       { x: -52060, y: 1910 },
+      { x: -51170, y: 2080 },
+      { x: -51150, y: 2080 },
     ],
     solidDecor: [
       { type: 'barrel', x: -52185, y: 1928 },

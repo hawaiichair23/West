@@ -6,6 +6,7 @@ const LIVERY_ROWS: BuyMenuRow[] = [
   { kind: 'item', entry: { type: 'saddle', buyPrice: 800 } },
   { kind: 'item', entry: { type: 'quirt', buyPrice: 200 } },
   { kind: 'item', entry: { type: 'rope', buyPrice: 25 } },
+  { kind: 'item', entry: { type: 'brand', buyPrice: 150 } },
   { kind: 'header', label: 'Consumables' },
   { kind: 'item', entry: { type: 'hay', buyPrice: 8 } },
   { kind: 'item', entry: { type: 'water', buyPrice: 5 } },

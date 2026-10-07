@@ -7,7 +7,10 @@ import { PLACES } from '../world/places'
 import { COLORS, FONT } from '../colors'
 import { UI_BAR_HEIGHT, UI } from './UI'
 import { tickSmeltingPlot, pushToSmeltingPlot, peekSmeltingOutput, takeSmeltingOutput } from '../game/smelting'
-import { state, BUILDINGS, getEffectiveTickMs, getStorageCap, getPlotSlotCap, createContainerContents, Terrain, TERRAIN_TILE, WOOD_TILE, PLAYER_BASE_SPEED, WORLD_WELL_CAP, type BuiltType } from '../game/state'
+import { state, BUILDINGS, getEffectiveTickMs, getStorageCap, getPlotSlotCap, createContainerContents, Terrain, TERRAIN_TILE, WOOD_TILE, PLAYER_BASE_SPEED, WORLD_WELL_CAP, rollDepotOrder, type BuiltType } from '../game/state'
+import { runDialogue } from '../game/dialogue/runner'
+import { DIALOGUE_GRAPHS } from '../game/dialogue'
+import type { WorldCommand } from '../game/dialogue/worldCommands'
 import { previewCraft, consumeCraft } from '../items/recipes'
 import { ITEMS, CONTAINER_PHYSICS, DEFAULT_CONTAINER_PHYSICS, cloneStack, rollRarity, BAR_TYPES, LOCKBOX_PURE_QUILL_CHANCE, LOCKBOX_RARE_CHANCE, type ItemStack, type ItemDef, type ItemType } from '../items/types'
 import { generateWorld, generateRegionDecor, generateRegionBuried, buildTrail, scatterTrailTrees, scatterTrailRockClusters, pickHerdSite, makeRng, rollLockboxTools, rollLockboxSideSlots, type GenRect, type DecorItem } from '../world/gen'
@@ -22,9 +25,9 @@ import { PLOT_COLS, PLOT_ROWS, PLOT_SIZE, PLOT_SPACING } from '../world/plotCons
 import { RopeController, CAT_HONSE, CAT_WATER, CAT_CRATE, CAT_WORLD, ROPE_LEASH_LENGTH, ROPE_LEASH_SOFT_START } from '../world/ropeController'
 import { updateHonses, getHonseBodyAABB, createHonse, spookHonse, spookHonsesFromShot, HONSE_TUNING, HONSE_TRAITS, type HonseSpecies } from '../world/honse'
 import { updateCoyotes, createCoyote, getCoyoteBodyAABB, getCoyoteMouthAnchor, COYOTE_BITE_RADIUS, COYOTE_BITE_COOLDOWN_MS, COYOTE_BITE_DAMAGE } from '../world/coyote'
-import { updateBandits, createBandit, startBanditRetreat, getBanditBodyAABB, generateBanditLoot, generateBanditName, BANDIT_SPREAD, BANDIT_KNOCKBACK, BANDIT_KNOCKBACK_MS, BANDIT_MUZZLE_DY, BANDIT_MANACLE_ICON_DY } from '../world/bandit'
-import type { Bandit } from '../world/bandit'
-import { GunController, spawnCrumbs, spawnCrumbWave, spawnParticles, BULLET_SPEED, damageEnemy, type Bullet } from '../game/combat'
+import { BANDIT_SPREAD, BANDIT_MANACLE_ICON_DY, BODY_LOOT_RANGE, getBanditBodyAABB } from '../world/bandit'
+import { BanditController } from '../world/banditController'
+import { GunController, spawnCrumbs, spawnCrumbWave, spawnParticles, BULLET_SPEED, damageEnemy, ENEMY_KNOCKBACK_MS, ENEMY_HOP_H, type Bullet } from '../game/combat'
 import { listEnemies } from '../world/enemy'
 import type { EnemyRef } from '../world/enemy'
 import { updateTumbleweeds, clearTumbleweeds } from '../world/tumbleweed'
@@ -61,6 +64,10 @@ const FORT_EAST_NO_SCATTER = { minX: -51250, maxX: -49780, minY: 1320, maxY: 210
 // painter and the tree placer so they always cover the same region.
 const GRASS_BAND_W = 8000
 const GRASS_BAND_FADE = 600
+const LT_RIDE_SPEED = 1.2
+const LT_PATROL_SPEED = 0.8
+const LT_MOUNT_OFFSET_Y = 5
+const LT_SHADOW_OFFSET_Y = 12
 // Trail waypoints: the westward route from the settled area to Fort Worth.
 // Each entry is a bend in the trail — the path snakes between them with the
 // same pebble wobble as the existing wilderness path. Authored positions.
@@ -124,7 +131,6 @@ const MOUNT_RANGE = 80
 import { TOOL_RANGE, CRATE_RANGE, ACTION_CURSOR, resolveAction, type ItemAction, type WorldContext } from '../game/ItemActionController'
 export { ACTION_CURSOR }
 export type OverworldAction = ItemAction
-const BODY_LOOT_RANGE = 80
 const MANACLED_INTERACT_RANGE = 80
 
 interface InteractOption {
@@ -166,7 +172,7 @@ const MOUNT_SADDLE_Y = -10
 const SPRITE_SCALE = 3            
 const PLAYER_SCALE = 2   
 
-type ObstacleKind = 'tree' | 'rock' | 'post' | 'building' | 'solid' | 'crate' | 'gate' | 'trough'
+type ObstacleKind = 'tree' | 'rock' | 'post' | 'building' | 'solid_building' | 'solid' | 'crate' | 'gate' | 'trough'
 
 // True if two axis-aligned rectangles overlap. First rect is center+half-extent
 // (px, py, half), second is origin+size (x, y, w, h).
@@ -183,6 +189,20 @@ export class Overworld extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite
   private troopers: Phaser.GameObjects.Sprite[] = []
   private trooperShadows: Phaser.GameObjects.Sprite[] = []
+  private lieutenants: {
+    sprite: Phaser.GameObjects.Sprite
+    mount: Phaser.GameObjects.Sprite
+    shadow: Phaser.GameObjects.Sprite
+    homeX: number
+    homeY: number
+    safeZoneIndex: number
+    oneTime: boolean
+    intercepted: boolean
+    patrol: { x: number; y: number }[]
+    patrolIndex: number
+    mode: 'patrol' | 'intercept' | 'talk' | 'return'
+    stateKey: string
+  }[] = []
   private playerShadow!: Phaser.GameObjects.Sprite
   private ePrompt!: Phaser.GameObjects.Container
   private inPopup = false
@@ -201,7 +221,6 @@ export class Overworld extends Phaser.Scene {
   private mountedLastDx = 0
   private mountedLastDy = 0
   private horseGear = 0
-  private honsesSpawned = false
   private plotViews: PlotView[] = []
   // Non-enterable roofed houses; recorded so world gen keeps trees/rocks clear.
   private roofedHousePositions: { x: number; y: number }[] = []
@@ -276,13 +295,15 @@ export class Overworld extends Phaser.Scene {
   private honseSprites: Phaser.GameObjects.Sprite[] = []
   private honseShadows: Phaser.GameObjects.Sprite[] = []
   private coyoteSprites: Phaser.GameObjects.Sprite[] = []
-  private banditSprites: Phaser.GameObjects.Sprite[] = []
-  private banditManacleSprites: (Phaser.GameObjects.Sprite | null)[] = []
+  private bandits!: BanditController
   private interactMenuTarget: Interactable | null = null
   private carriedBanditSprite: Phaser.GameObjects.Sprite | null = null
   private carriedManacleSprite: Phaser.GameObjects.Sprite | null = null
   private honseBanditSprites: Map<number, { bandit: Phaser.GameObjects.Sprite; manacles: Phaser.GameObjects.Sprite }> = new Map()
   private npcSprites: Phaser.GameObjects.Sprite[] = []
+  private trailSignSprites: Phaser.GameObjects.Sprite[] = []
+  private crossroadsSignSprites: Phaser.GameObjects.Sprite[] = []
+  private deadTravelerSprites: Phaser.GameObjects.Sprite[] = []
   // Player velocity (px/sec), derived each frame from position delta. Bandits
   // read this to lead their shots.
   private playerVX = 0
@@ -299,12 +320,11 @@ export class Overworld extends Phaser.Scene {
   private lootRng: () => number = makeRng(0)
   private banditIdentityRng: () => number = makeRng(0)
   private honseRng: () => number = makeRng(0)
+  private depotBubbles: Map<number, Phaser.GameObjects.Container> = new Map()
+  private scriptedNpcs: Map<string, { sprite: Phaser.GameObjects.Sprite; shadow: Phaser.GameObjects.Sprite; obstacle: { x: number; y: number; w: number; h: number; kind: ObstacleKind } | null; body: MatterJS.BodyType | null; spawnX: number; spawnY: number }> = new Map()
   private worldCtx!: WorldContext
   // Carcass sprites, parallel to state.carcasses by index.
   private carcassSprites: Phaser.GameObjects.Sprite[] = []
-  // Bandit body sprites, parallel to state.banditBodies by index.
-  private banditBodySprites: Phaser.GameObjects.Sprite[] = []
-  // gameTime ms until which the player is invulnerable (i-frames after a hit)
   private invulnerableUntil = 0
   private playerKnockbackVx = 0
   private playerKnockbackVy = 0
@@ -366,6 +386,28 @@ export class Overworld extends Phaser.Scene {
     super('Overworld')
   }
 
+  private placeBarracks(x: number, y: number, flipX: boolean, midCount: number) {
+    const scale = 2.25
+    const TOP_H = 32
+    const MID_H = 32
+    const BOT_H = 77
+    const totalH = TOP_H + MID_H * midCount + BOT_H
+    const centerY = y
+    const topY = centerY - (totalH / 2) * scale
+    const depth = topY + (TOP_H + MID_H * midCount + BOT_H / 2) * scale + 29
+    let cursor = topY
+    const top = this.add.sprite(x, cursor + (TOP_H / 2) * scale, 'barrack_top').setScale(scale).setOrigin(0.5, 0.5).setDepth(depth)
+    if (flipX) top.setFlipX(true)
+    cursor += TOP_H * scale
+    for (let i = 0; i < midCount; i++) {
+      const mid = this.add.sprite(x, cursor + (MID_H / 2) * scale, 'barrack_mid').setScale(scale).setOrigin(0.5, 0.5).setDepth(depth)
+      if (flipX) mid.setFlipX(true)
+      cursor += MID_H * scale
+    }
+    const bot = this.add.sprite(x, cursor + (BOT_H / 2) * scale, 'barrack_bottom').setScale(scale).setOrigin(0.5, 0.5).setDepth(depth)
+    if (flipX) bot.setFlipX(true)
+  }
+
   preload() {
     this.load.bitmapFont('main', 'minecraftbm.png', 'minecraftbm.xml')
     this.load.bitmapFont('mainSmall', 'minecraftbmsmall.png', 'minecraftbmsmall.xml')
@@ -379,14 +421,19 @@ export class Overworld extends Phaser.Scene {
     this.load.image('field_growing', 'field_growing.png')
     this.load.image('field_mature', 'field_mature.png')
     this.load.image('field_patch', 'patch.png')
+    this.load.image('barracks', 'barracks.png')
+    this.load.image('barrack_top', 'barrackrooftop.png')
+    this.load.image('barrack_mid', 'barrackroofmid.png')
+    this.load.image('barrack_bottom', 'barrackbottom.png')
   }
 
   create() {
     loadSprites(this)
     state.init()
     this.registry.set('gold', state.gold)
+    this.registry.events.on('world_command', (cmd: WorldCommand) => this.executeWorldCommand(cmd))
 
-    // world background — cream, clickable for +1 gold
+    // world background 
     const wb = state.worldBounds
     this.worldBg = this.add.rectangle(wb.minX + wb.width / 2, wb.minY + wb.height / 2, wb.width, wb.height, COLORS.worldBg)
       .setStrokeStyle(2, COLORS.worldBorder)
@@ -505,48 +552,66 @@ export class Overworld extends Phaser.Scene {
         return  // right-click with non-food does nothing on the world
       }
 
-      // click on a tied rope to untie and destroy it
       if (this.rope.untieAtClick(p.worldX, p.worldY, this.player.x, this.player.y, TOOL_RANGE)) return
-      // Pipe held: a click near a built plot (including the gap between plots)
-      // places/connects; only a click away from any plot cancels a pending one.
       if (state.inventory[state.selectedInventorySlot]?.type === 'pipe' && p.leftButtonDown()) {
         if (this.handlePipeClick(p.worldX, p.worldY)) return
       }
-      // cancel pending pipe placement if clicking empty ground
       if (this.pendingPipeFrom !== null) { this.clearPipeGhosts() }
       if (state.isShovelSelected()) {
         this.tryDig(p.worldX, p.worldY)
         return
       }
-      // sapling selected? try to plant on a nearby dirt patch
       if (this.trySaplingPlant(p.worldX, p.worldY)) return
       if (this.tryPlaceDeed(p.worldX, p.worldY)) return
       if (this.tryMalletClick(p.worldX, p.worldY)) return
-      if (this.tryManacleBandit(p.worldX, p.worldY)) return
-      if (this.tryClickManacledBandit(p.worldX, p.worldY)) return
+      {
+        const slotIdx = state.selectedInventorySlot
+        const stack = state.inventory[slotIdx]
+        if (stack && this.bandits.tryManacle(p.worldX, p.worldY, stack, slotIdx)) return
+      }
+      if (!state.getSelectedTool()) {
+        const scopedIdx = this.bandits.tryClickManacled(p.worldX, p.worldY)
+        if (scopedIdx !== null) {
+          const target = this.findNearestInteractable(this.player.x, this.player.y)
+          if (target && target.options.length > 1) this.openInteractMenu(target)
+          return
+        }
+      }
       if (this.tryTalkToNpc(p.worldX, p.worldY)) return
-      // Tool-class dispatch: any held item with a class stat (chopping / mining)
-      // routes through a swing → primary action → shared destroy chain. Add a
-      // new class by adding a row.
-      const heldType = state.inventory[state.selectedInventorySlot]?.type
-      const heldDef = heldType ? ITEMS[heldType] : undefined
-      const TOOL_CLASSES: { stat: 'chopping' | 'mining'; damage: number; primary: (x: number, y: number) => boolean }[] = [
-        { stat: 'chopping', damage: Overworld.WEAPON_DAMAGE.axe,     primary: (x, y) => this.tryChop(x, y) },
-        { stat: 'mining',   damage: Overworld.WEAPON_DAMAGE.pickaxe, primary: (x, y) => this.tryMine(x, y) },
-      ]
-      for (const cls of TOOL_CLASSES) {
-        if (!heldDef || heldDef[cls.stat] == null) continue
-        ui.getCursorController().setAxeSwung(true)
-        if (this.tryMeleeEnemy(p.worldX, p.worldY, cls.damage)) return
-        if (cls.primary(p.worldX, p.worldY)) return
-        if (this.tryAxePost(p.worldX, p.worldY)) return
-        if (this.tryAxeCrate(p.worldX, p.worldY)) return
-        if (this.tryAxeGate(p.worldX, p.worldY)) return
-        if (this.tryDestroyPlot(p.worldX, p.worldY)) return
-        if (this.tryDestroyPipe(p.worldX, p.worldY)) return
-        if (this.tryPickupWood(p.worldX, p.worldY)) return
-        if (this.tryDestroyTrough(p.worldX, p.worldY)) return
-        break
+      const action = this.resolveOverworldAction(p.worldX, p.worldY)
+      if (action) {
+        const heldType = state.inventory[state.selectedInventorySlot]?.type
+        const heldDef = heldType ? ITEMS[heldType] : undefined
+        const damage = heldDef?.combat != null
+          ? (heldDef.chopping != null ? 3 : heldDef.mining != null ? 1 : 0)
+          : 0
+        switch (action.kind) {
+          case 'chop-tree':
+          case 'mine-rock':
+          case 'destroy-post':
+          case 'destroy-crate':
+          case 'destroy-gate':
+          case 'destroy-plot':
+          case 'destroy-pipe':
+          case 'destroy-wood':
+          case 'tool-generic':
+            ui.getCursorController().setAxeSwung(true)
+            if (damage > 0 && this.tryMeleeEnemy(p.worldX, p.worldY, damage)) return
+            break
+        }
+        switch (action.kind) {
+          case 'chop-tree': if (this.tryChop(p.worldX, p.worldY)) return; break
+          case 'mine-rock': if (this.tryMine(p.worldX, p.worldY)) return; break
+          case 'destroy-post': if (this.destroyPostAt(action.targetIndex)) return; break
+          case 'destroy-crate': if (this.destroyCrateAt(action.targetIndex)) return; break
+          case 'destroy-gate': if (this.destroyGateAt(action.targetIndex)) return; break
+          case 'destroy-plot': if (this.destroyPlotAt(action.targetIndex)) return; break
+          case 'destroy-pipe': this.removePipe(action.targetIndex); return
+          case 'destroy-wood': if (this.tryPickupWood(p.worldX, p.worldY)) return; break
+        }
+        if (heldDef?.chopping != null || heldDef?.mining != null) {
+          if (this.tryDestroyTrough(p.worldX, p.worldY)) return
+        }
       }
       if (state.inventory[state.selectedInventorySlot]?.type === 'quirt' && state.mounted !== null) {
         this.horseGear = (this.horseGear + 1) % 3
@@ -620,6 +685,31 @@ export class Overworld extends Phaser.Scene {
       }
     }
 
+    this.createPlotAt(startX - PLOT_SPACING, startY + PLOT_ROWS * PLOT_SPACING, 'depot')
+    {
+      const depotIndex = this.plotViews.length - 1
+      const view = this.plotViews[depotIndex]
+      view.building = this.add.sprite(view.x, view.y, 'depot').setScale(SPRITE_SCALE).setDepth(view.y + 8)
+      const plotAABB = { x: view.x - 24, y: view.y - 24, w: 48, h: 48, kind: 'building' as ObstacleKind }
+      this.obstacles.push(plotAABB)
+      this.plotBlockerBodies.set(depotIndex, this.addBlocker(plotAABB))
+      const plot = state.plots[depotIndex]
+      if (!plot.depotOrder) plot.depotOrder = rollDepotOrder()
+      const def = BUILDINGS['depot']
+      view.nameLabel = createOutlinedLabel(
+        this,
+        view.x,
+        view.y - PLOT_SIZE / 2 - 4,
+        def.name,
+        'mainSmall',
+        FONT.desc,
+        COLORS.white,
+        COLORS.black,
+        2,
+      ).setDepth(100000)
+      this.buildDepotBubbles(depotIndex)
+    }
+
     // Trail-side sites (houses + towns) and the authored lone house are
     // instantiated later — after the world grows west and after the fixed-
     // structure render loop — so their grass writes land and sprites draw once.
@@ -671,15 +761,54 @@ export class Overworld extends Phaser.Scene {
     this.lootRng = makeRng(state.worldSeed + 4242)
     this.banditIdentityRng = makeRng(state.worldSeed + 5150)
     this.honseRng = makeRng(state.worldSeed + 3737)
+    this.bandits = new BanditController({
+      scene: this,
+      interiorKey: undefined,
+      getPlayer: () => ({ x: this.player.x, y: this.player.y, vx: this.playerVX, vy: this.playerVY }),
+      collidesAt: (px, py) => this.collidesAt(px, py, undefined, true),
+      blocksLineOfSight: (px, py) => this.collidesAt(px, py, undefined, true, true),
+      fireHostile: (bx, by, dx, dy) => this.fireBanditBullet(bx, by, dx, dy),
+      getPlayerBullets: () => this.gun.bullets.filter(bl => !bl.fromBandit).map(bl => ({ x: bl.x, y: bl.y, vx: bl.vx, vy: bl.vy })),
+      lootRng: this.lootRng,
+      dodgeRng: this.banditRng,
+      identityRng: this.banditIdentityRng,
+      getTetherAnchor: (i) => this.rope.getBanditTetherAnchor(i),
+      playerSafe: () => this.playerInSafeZone(),
+      banditSpriteScale: PLAYER_SCALE,
+      manacleOutlineColor: COLORS.worldBg,
+      onBanditKilled: (bodyId, wasManacled) => {
+        if (!wasManacled) return
+        const body = state.banditBodies.find(b => b.id === bodyId)
+        if (body) this.dropStack(body.x, body.y, { type: 'manacles', count: 1 })
+      },
+    })
     this.decorData.push(...layout.decor)
     for (const r of layout.rocks) {
       this.spawnRockFormation(r.x, r.y)
+    }
+    if (layout.rocks.length > 0) {
+      let nearest = layout.rocks[0]
+      let bestSq = (nearest.x - cx) * (nearest.x - cx) + (nearest.y - cy) * (nearest.y - cy)
+      for (const r of layout.rocks) {
+        const dSq = (r.x - cx) * (r.x - cx) + (r.y - cy) * (r.y - cy)
+        if (dSq < bestSq) { nearest = r; bestSq = dSq }
+      }
+      const minerX = nearest.x + 40
+      const minerY = nearest.y + 20
+      const exists = state.npcs.some(n => n.x === minerX && n.y === minerY)
+      if (!exists) {
+        state.npcs.push({
+          x: minerX, y: minerY, name: 'Miner', sprite: 'miner',
+          graph: 'miner',
+          lines: [],
+        })
+      }
     }
     // fixed landmark heap near spawn — NOT procedural. Always in the same spot
     // every world so the player has a known, reliable rock to mine once they
     // get the pickaxe. The seeded cluster above is the real deposit; this is
     // the tutorial anchor.
-    this.spawnRockFormation(cx - 240, cy + 280)
+    this.spawnRockFormation(cx - 240, cy + 380)
     // seed buried items from the layout
     state.buriedItems = layout.buried.map(b => ({ x: b.x, y: b.y, reward: b.reward }))
     state.buriedGems = layout.buriedGems.map(g => ({ x: g.x, y: g.y, type: g.type }))
@@ -742,7 +871,8 @@ export class Overworld extends Phaser.Scene {
     // procedural settlement long houses — seeded by world + position so each one
     // varies between worlds but stays stable within a world.
     for (const s of state.worldStructures) {
-      if (s.type !== 'long_house' || s.tint !== undefined) continue
+      const effectiveSprite = s.sprite ?? WORLD_STRUCTURES[s.type].sprite
+      if ((effectiveSprite !== 'long_house' && effectiveSprite !== 'longhouse') || s.tint !== undefined) continue
       const tintRng = makeRng((state.worldSeed + Math.floor(s.x) * 31 + Math.floor(s.y) * 17) >>> 0)
       s.tint = Overworld.LONG_HOUSE_TINTS[Math.floor(tintRng() * Overworld.LONG_HOUSE_TINTS.length)]
     }
@@ -751,7 +881,8 @@ export class Overworld extends Phaser.Scene {
     for (const s of state.worldStructures) {
       const def = WORLD_STRUCTURES[s.type]
       const bottomY = s.y + 24 - 16
-      if (s.sprite === 'longhouse') {
+      const effectiveSprite = s.sprite ?? def.sprite
+      if (effectiveSprite === 'longhouse') {
         if (!this.textures.exists('longhouse_walls')) spriteToTexture(this, 'longhouse_walls', longhouseWallLayer())
         const { roofMain, roofStripe } = this.rollHouseColors(state.worldSeed + s.x * 71 + s.y * 31)
         const roofKey = `longhouse_roof_${s.x}_${s.y}`
@@ -771,6 +902,20 @@ export class Overworld extends Phaser.Scene {
         this.placeRoofedHouse(s.x, s.y, def.scale, undefined, s.type === 'house_roof_double')
         continue
       }
+      if (s.type === 'barracks') {
+        const midCount = s.midCount ?? 2
+        this.placeBarracks(s.x, s.y, !!s.flipX, midCount)
+        const scale = 2.25
+        const w = 65 * scale
+        const h = (32 + 32 * midCount + 77) * scale
+        this.obstacles.push({ x: s.x - w / 2 + 4, y: s.y - h / 2 + 80, w: w - 6, h: h - 93, kind: 'solid_building' as ObstacleKind })
+        if (s.door) {
+          const dx = s.door.side === 'east' ? s.x + w / 2 - 2 : s.door.side === 'west' ? s.x - w / 2 + 2 : s.x
+          const dy = s.door.side === 'north' || s.door.side === 'south' ? s.y : s.y + s.door.offset
+          this.add.rectangle(dx + 6, dy, 12, 32, 0x3A1A0E).setDepth(s.y - 500)
+        }
+        continue
+      }
       const spr = this.add.sprite(s.x, s.y, def.sprite).setScale(def.scale).setDepth(bottomY)
       if (s.flipX) spr.setFlipX(true)
       const tint = s.tint ?? def.tint
@@ -783,6 +928,8 @@ export class Overworld extends Phaser.Scene {
         if (tint !== undefined) mirror.setTint(tint)
         // building footprint covers both halves: x ranges ~[-24, +48], y ~±24
         this.obstacles.push({ x: s.x - 24, y: s.y - 24, w: 72, h: 48, kind: 'building' as ObstacleKind })
+      } else if (def.hitbox) {
+        this.obstacles.push({ x: s.x - def.hitbox.w / 2, y: s.y - def.hitbox.h / 2, w: def.hitbox.w, h: def.hitbox.h, kind: 'building' as ObstacleKind })
       } else {
         this.obstacles.push({ x: s.x - 24, y: s.y - 24, w: 48, h: 48, kind: 'building' as ObstacleKind })
       }
@@ -898,8 +1045,8 @@ export class Overworld extends Phaser.Scene {
     // Authored fences: single posts come from state (built in init, rendered by
     // the post-restore loop above). Runs and boxes are replayed here from PLACES.
     for (const place of Object.values(PLACES)) {
-      for (const r of place.postRuns) this.postLine(r.x1, r.y1, r.x2, r.y2, r.spacing, r.species)
-      for (const b of place.postBoxes) this.postBox(b.x1, b.y1, b.x2, b.y2, b.spacing, b.species)
+      for (const r of place.postRuns) this.postLine(r.x1, r.y1, r.x2, r.y2, r.spacing, r.species, undefined, r.protected)
+      for (const b of place.postBoxes) this.postBox(b.x1, b.y1, b.x2, b.y2, b.spacing, b.species, b.skip, b.protected)
     }
     for (const g of state.placedGates) {
       this.setGateOrientation(g, this.isVerticalGate(g.x, g.y))
@@ -970,21 +1117,9 @@ export class Overworld extends Phaser.Scene {
     this.player = this.add.sprite(cx, cy, 'player').setScale(PLAYER_SCALE).setDepth(cy)
 
     if (state.npcs.length === 0) {
-      state.npcs.push({
-        x: cx + 80, y: cy, name: 'Sheriff',
-        lines: [
-          { text: 'Howdy, stranger.', speaker: 'Sheriff' },
-          { text: 'We got a man causing trouble. Interested in the work?', speaker: 'Sheriff', options: [
-            { label: 'Accept', act: () => { console.log('accepted bounty') } },
-            { label: 'Tell me more', act: () => { console.log('more info') } },
-            { label: 'How much?', act: () => { console.log('asked price') } },
-            { label: 'Decline', act: () => { console.log('declined') } },
-          ]},
-        ],
-      })
     }
     for (const npc of state.npcs) {
-      this.npcSprites.push(this.add.sprite(npc.x, npc.y, 'player').setScale(PLAYER_SCALE).setDepth(npc.y))
+      this.npcSprites.push(this.add.sprite(npc.x, npc.y, npc.sprite ?? 'player').setScale(PLAYER_SCALE).setDepth(npc.y))
     }
     {
       const baseX = -51134, baseY = 2039, spacing = 30, topY = 1480
@@ -1066,14 +1201,14 @@ export class Overworld extends Phaser.Scene {
     this.matter.world.on('collisionactive', (e: any) => capture(e.pairs))
     // Static Matter bodies so rope segments and crates bounce off buildings.
     // Posts get their own blockers at placement time (see tryPlacePost / restore loop).
-    for (const o of this.obstacles) if (o.kind === 'building') this.addBlocker(o)
+    for (const o of this.obstacles) if (o.kind === 'building' || o.kind === 'solid_building') this.addBlocker(o)
 
     // camera — viewport starts below the top bar, extends to bottom of canvas
     const cam = this.cameras.main
     cam.setViewport(0, 0, cam.width, cam.height)
     cam.startFollow(this.player)
     cam.setBounds(state.worldBounds.minX, state.worldBounds.minY, state.worldBounds.width, state.worldBounds.height)
-    cam.setZoom(1.08)
+    cam.setZoom(1.10)
 
     // Safe zones: the original map bounds (captured before the permanent grows
     // below) are a no-combat area. Fort Worth will append a second zone later.
@@ -1084,7 +1219,7 @@ export class Overworld extends Phaser.Scene {
       h: state.worldBounds.height,
     }]
     // initialize the key so the first real transition fires changedata (not setdata)
-    this.registry.set('inCombat', false)
+    this.registry.set('inCombat', state.heartsRevealed)
     this.registry.set('playerHealth', state.health)
     this.registry.set('playerMaxHealth', state.maxHealth)
 
@@ -1141,6 +1276,36 @@ export class Overworld extends Phaser.Scene {
     this.decorData.push(...trailDecor)
     this.cullDecor()
 
+    if (state.trailSigns.length === 0) {
+      const signPositions = [
+        { x: -15000, fwMiles: 100, lsMiles: 30 },
+        { x: -30000, fwMiles: 50, lsMiles: 80 },
+      ]
+      for (const s of signPositions) {
+        let bestDx = Infinity
+        let bestY = 2300
+        for (const c of trailCenterline) {
+          const d = Math.abs(c.x - s.x)
+          if (d < bestDx) { bestDx = d; bestY = c.y }
+        }
+        state.trailSigns.push({ x: s.x, y: bestY + 60, fwMiles: s.fwMiles, lsMiles: s.lsMiles })
+      }
+    }
+    for (const sign of state.trailSigns) {
+      this.trailSignSprites.push(this.add.sprite(sign.x, sign.y, 'trail_sign').setScale(2).setDepth(sign.y))
+    }
+
+    if (state.crossroadsSigns.length === 0) {
+      state.crossroadsSigns.push({ x: PRESTON_JUNCTION_X + 60, y: 2360 })
+    }
+    for (const sign of state.crossroadsSigns) {
+      this.crossroadsSignSprites.push(this.add.sprite(sign.x, sign.y, 'crossroads_sign').setScale(2).setDepth(sign.y))
+    }
+
+
+
+
+
     // Trail-side sites: abandoned houses and settlements (towns). Each category
     // is guaranteed at least 2 and varies up to 4, scattered along the whole
     // trail. Towns avoid the houses' positions so everything stays spaced apart.
@@ -1183,9 +1348,19 @@ export class Overworld extends Phaser.Scene {
         false,
         siteMinX,
       )
+      const caravan = scatterSites(
+        TRAIL_WAYPOINTS,
+        state.worldSeed + 6660,
+        1,
+        ['downed_caravan'],
+        [...southTowns, ...northTowns, ...houses].map(s => s.x),
+        true,
+        siteMinX,
+      )
       for (const site of southTowns) this.instantiateSite(site)
       for (const site of northTowns) this.instantiateSite(site)
       for (const site of houses) this.instantiateSite(site)
+      for (const site of caravan) this.instantiateSite(site)
 
       // authored lone house south of spawn — via site so it gets a seeded tint
       // like every other house (can't exist untinted).
@@ -1272,18 +1447,64 @@ export class Overworld extends Phaser.Scene {
 
     for (let i = 0; i < 5; i++) this.spawnHonse(-53118, 4470, false, false, 'bison')
 
+    const STARTER_HONSE_CLUSTER_R = 40
+    for (let i = 0; i < 3; i++) {
+      const ang = (i / 3) * Math.PI * 2
+      this.spawnHonse(3268 + Math.cos(ang) * STARTER_HONSE_CLUSTER_R, 1367 + Math.sin(ang) * STARTER_HONSE_CLUSTER_R)
+    }
+
     for (const place of Object.values(PLACES)) {
       for (const h of place.honses) this.spawnHonse(h.x, h.y, h.tame, true)
       for (const t of place.trees) this.placeTree(t.x, t.y)
       for (const tr of place.troopers) {
-        const spr = this.add.sprite(tr.x, tr.y, 'cavalry_trooper').setScale(PLAYER_SCALE).setDepth(tr.y)
+        const spr = this.add.sprite(tr.x, tr.y, tr.sprite ?? 'cavalry_trooper').setScale(PLAYER_SCALE).setDepth(tr.y)
+        spr.setData('baseSprite', tr.sprite ?? 'cavalry_trooper')
+        let obstacle: { x: number; y: number; w: number; h: number; kind: ObstacleKind } | null = null
+        let body: MatterJS.BodyType | null = null
+        if (tr.sprite === 'cavalry_trooper_leaning') {
+          obstacle = { x: -51310 - 15, y: 1912 - 15, w: 30, h: 30, kind: 'solid_building' as ObstacleKind }
+          this.obstacles.push(obstacle)
+          body = this.addBlocker(obstacle)
+        }
         spr.setData('dir', tr.faceLeft ? -1 : 1)
         spr.setData('stationary', tr.stationary)
         if (tr.faceLeft) spr.setFlipX(true)
         this.troopers.push(spr)
-        this.trooperShadows.push(
-          this.add.sprite(tr.x, tr.y + 18, 'trooper_shadow').setOrigin(0.5, 0).setScale(PLAYER_SCALE).setDepth(tr.y - 1).setAlpha(0.22)
-        )
+        const shadow = this.add.sprite(tr.x, tr.y + 18, 'trooper_shadow').setOrigin(0.5, 0).setScale(PLAYER_SCALE).setDepth(tr.y - 1).setAlpha(0.22)
+        this.trooperShadows.push(shadow)
+        if (tr.npcId) {
+          this.scriptedNpcs.set(tr.npcId, { sprite: spr, shadow, obstacle, body, spawnX: tr.x, spawnY: tr.y })
+        }
+        if (tr.dialogue || tr.graph) {
+          const exists = state.npcs.some(n => n.x === tr.x && n.y === tr.y)
+          if (!exists) {
+            state.npcs.push({
+              x: tr.x, y: tr.y, name: 'Trooper',
+              graph: tr.graph,
+              lines: tr.dialogue ? [{ text: tr.dialogue, speaker: 'Trooper' }] : [],
+            })
+          }
+        }
+      }
+      if (place.lieutenants) {
+        for (const lt of place.lieutenants) {
+          if (true) continue
+          const stateKey = `lieutenant:${lt.x},${lt.y}`
+          const sprite = this.add.sprite(lt.x, lt.y - 27, 'cavalry_trooper_mounted').setScale(PLAYER_SCALE).setDepth(lt.y)
+          const mount = this.add.sprite(lt.x, sprite.y + LT_MOUNT_OFFSET_Y, 'honse_palomino').setScale(PLAYER_SCALE).setDepth(lt.y - 1).setFlipX(true)
+          const shadow = this.add.sprite(lt.x, mount.y + LT_SHADOW_OFFSET_Y, 'blob_shadow').setOrigin(0.5, 0).setScale(PLAYER_SCALE).setDepth(lt.y - 2).setAlpha(0.22)
+          this.lieutenants.push({
+            sprite, mount, shadow,
+            homeX: lt.x, homeY: lt.y,
+            safeZoneIndex: lt.safeZoneIndex,
+            oneTime: lt.oneTime ?? false,
+            intercepted: !!(lt.oneTime && state.lieutenantInterceptedFW && stateKey === 'lieutenant:-51333,2279'),
+            patrol: lt.patrol ?? [],
+            patrolIndex: 0,
+            mode: 'patrol',
+            stateKey,
+          })
+        }
       }
     }
 
@@ -1394,7 +1615,7 @@ export class Overworld extends Phaser.Scene {
         const trailY = trailYAtX(TRAIL_WAYPOINTS, bRock.x)
         const by = bRock.y < trailY ? bRock.y - BANDIT_HIDE_OFFSET : bRock.y + BANDIT_HIDE_OFFSET
         // nudge right 15px — the rock's visual center sits left of its anchor x
-        this.spawnBandit(bRock.x + 15, by)
+        this.bandits.spawnBandit(bRock.x + 15, by)
       }
     }
 
@@ -1700,6 +1921,10 @@ export class Overworld extends Phaser.Scene {
       state.playerInWorld = true
       this.player.setVisible(true)
       this.playerShadow.setVisible(true)
+      if (state.carriedBandit && !this.carriedBanditSprite) {
+        this.carriedBanditSprite = this.add.sprite(this.player.x, this.player.y - 16, 'player').setScale(PLAYER_SCALE).setDepth(this.player.depth + 1)
+        this.carriedManacleSprite = outlineIcon(this.add.sprite(this.player.x, this.player.y - 16 + BANDIT_MANACLE_ICON_DY, 'item_manacles').setScale(1).setDepth(this.player.depth + 2), COLORS.worldBg)
+      }
       // A workshop may have been upgraded inside; refresh its exterior sprite
       // so a level-2 workshop shows the upgraded building.
       this.refreshPlotBuildingSprites()
@@ -1710,7 +1935,10 @@ export class Overworld extends Phaser.Scene {
         if (this.exitForceDir && this.preInteriorBuildingPos) {
           const bx = this.preInteriorBuildingPos.x
           const by = this.preInteriorBuildingPos.y
-          if (this.exitForceDir === 'south') {
+          if (this.preInteriorExitPos) {
+            this.player.x = this.preInteriorExitPos.x
+            this.player.y = this.preInteriorExitPos.y
+          } else if (this.exitForceDir === 'south') {
             this.player.x = bx
             this.player.y = by + 25
           } else if (this.exitForceDir === 'left') {
@@ -1734,6 +1962,7 @@ export class Overworld extends Phaser.Scene {
         this.player.setDepth(this.player.y - 8)
         this.preInteriorPos = null
         this.preInteriorBuildingPos = null
+        this.preInteriorExitPos = null
         this.exitForceDir = null
       }
       // ignore door detection until the player moves out of the current
@@ -1744,17 +1973,18 @@ export class Overworld extends Phaser.Scene {
 
   private preInteriorPos: { x: number; y: number } | null = null
   private preInteriorBuildingPos: { x: number; y: number } | null = null
+  private preInteriorExitPos: { x: number; y: number } | null = null
   private exitForceDir: 'south' | 'left' | 'right' | null = null
   private safeZones: GenRect[] = []
   private inCombat = false
   // true after exiting an interior; cleared once the player walks out of any door zone.
   private doorCheckBlocked = false
 
-  private createPlotAt(x: number, y: number): number {
+  private createPlotAt(x: number, y: number, preBuilt?: BuiltType): number {
     return createPlot(this, x, y, this.plotViews, {
       onPipeClick: (wx, wy) => this.handlePipeClick(wx, wy),
       onDestroyPlot: (wx, wy) => this.tryDestroyPlot(wx, wy),
-    })
+    }, preBuilt)
   }
 
   private enterPlotInterior(plotIndex: number, type: BuiltType) {
@@ -1789,8 +2019,10 @@ export class Overworld extends Phaser.Scene {
     this.preInteriorPos = { x: this.player.x, y: this.player.y }
     const s = state.worldStructures[structureIndex]
     this.preInteriorBuildingPos = { x: s.x, y: s.y }
+    this.preInteriorExitPos = s.door?.exit ?? null
     this.exitForceDir = type === 'abandoned_house' ? 'south'
       : type === 'long_house' ? (s.flipX ? 'left' : 'right')
+      : type === 'barracks' ? 'right'
       : null
     this.cameras.main.setVisible(false)
     this.registry.events.emit('interior-entered')
@@ -2094,69 +2326,42 @@ export class Overworld extends Phaser.Scene {
     // Hit area = each enemy's body AABB expanded by a margin, so a click anywhere
     // on the visible enemy lands (raw body boxes are smaller than the sprites).
     const M = 14
-    for (const ref of listEnemies(state.coyotes, state.bandits)) {
+    for (const ref of listEnemies(state.coyotes, [])) {
       if (ref.enemy.dying) continue
       const b = ref.body
       if (clickX < b.x - M || clickX > b.x + b.w + M) continue
       if (clickY < b.y - M || clickY > b.y + b.h + M) continue
-      // An enemy still in its i-frame flash can't be hit — skip it so a click can
-      // still land on another valid enemy under the cursor instead of whiffing.
       if (!this.damageEnemy(ref, damage, this.player.x, this.player.y, false, true)) continue
-      this.lastChopAt = now   // start cooldown only on a landed hit
+      this.lastChopAt = now
       return true
     }
-    return false
-  }
-
-  private tryManacleBandit(clickX: number, clickY: number): boolean {
-    const slotIdx = state.selectedInventorySlot
-    const stack = state.inventory[slotIdx]
-    if (!stack || stack.type !== 'manacles') return false
-    const dx = clickX - this.player.x
-    const dy = clickY - this.player.y
-    if (dx * dx + dy * dy > TOOL_RANGE * TOOL_RANGE) return false
-
-    const M = 14
-    for (let i = 0; i < state.bandits.length; i++) {
-      const ba = state.bandits[i]
-      if (ba.dying || ba.manacled) continue
+    const scoped = this.bandits.scopedBandits()
+    for (let si = 0; si < scoped.length; si++) {
+      const ba = scoped[si]
+      if (ba.dying) continue
       const b = getBanditBodyAABB(ba)
       if (clickX < b.x - M || clickX > b.x + b.w + M) continue
       if (clickY < b.y - M || clickY > b.y + b.h + M) continue
-      ba.manacled = true
-      if (!ba.contents) ba.contents = generateBanditLoot(this.lootRng)
-      stack.count -= 1
-      if (stack.count <= 0) state.inventory[slotIdx] = null
-      this.registry.events.emit('inventory-changed')
-      this.banditManacleSprites[i] = outlineIcon(this.add.sprite(ba.x, ba.y + BANDIT_MANACLE_ICON_DY, 'item_manacles').setScale(1).setDepth(100000), COLORS.worldBg)
-      return true
-    }
-    return false
-  }
-
-  private tryClickManacledBandit(clickX: number, clickY: number): boolean {
-    const tool = state.getSelectedTool()
-    if (tool) return false
-    const M = 14
-    for (let i = 0; i < state.bandits.length; i++) {
-      const ba = state.bandits[i]
-      if (!ba.manacled || ba.dying) continue
-      const b = getBanditBodyAABB(ba)
-      if (clickX < b.x - M || clickX > b.x + b.w + M) continue
-      if (clickY < b.y - M || clickY > b.y + b.h + M) continue
-      const target = this.findNearestInteractable(this.player.x, this.player.y)
-      if (target && target.options.length > 1) this.openInteractMenu(target)
+      if (!this.bandits.damageBandit(si, damage, this.player.x, this.player.y, false, true)) continue
+      this.lastChopAt = now
       return true
     }
     return false
   }
 
   private tryTalkToNpc(clickX: number, clickY: number): boolean {
+    const ui = this.scene.get('UI') as UI
+    if (ui.isDialogueOpen() || ui.dialogueInputConsumed()) return false
     const idx = this.canTalkToNpc(clickX, clickY)
     if (idx === null) return false
     const npc = state.npcs[idx]
     if (!npc) return false
-    this.registry.events.emit('open-dialogue', npc.lines)
+    if (npc.graph) {
+      const g = DIALOGUE_GRAPHS[npc.graph]
+      if (g) runDialogue(this.registry.events, g, { npcX: npc.x, npcY: npc.y })
+    } else {
+      this.registry.events.emit('open-dialogue', npc.lines)
+    }
     return true
   }
 
@@ -2183,6 +2388,7 @@ export class Overworld extends Phaser.Scene {
     if (state.mounted === null) {
       const bodySq = BODY_LOOT_RANGE * BODY_LOOT_RANGE
       for (const b of state.banditBodies) {
+        if (b.interiorKey !== undefined) continue
         if (b.carried) continue
         const dx = b.x - px
         const dy = b.y - py
@@ -2195,8 +2401,9 @@ export class Overworld extends Phaser.Scene {
       }
 
       const manSq = MANACLED_INTERACT_RANGE * MANACLED_INTERACT_RANGE
-      for (let i = 0; i < state.bandits.length; i++) {
-        const ba = state.bandits[i]
+      const scopedBandits = this.bandits.scopedBandits()
+      for (let i = 0; i < scopedBandits.length; i++) {
+        const ba = scopedBandits[i]
         if (!ba.manacled || ba.dying) continue
         const dx = ba.x - px
         const dy = ba.y - py
@@ -2208,32 +2415,21 @@ export class Overworld extends Phaser.Scene {
             x: ba.x, y: ba.y, promptDy: -24, rangeSq: manSq,
             options: [
               { label: 'Inspect', act: () => {
-                const ba2 = state.bandits[banditIdx]
-                if (!ba2 || !ba2.contents) return
-                this.registry.events.emit('open-live-contents', ba2.contents, ba2.name, ba2.x, ba2.y)
+                const cur = this.bandits.scopedBandits()[banditIdx]
+                if (!cur || !cur.contents) return
+                this.registry.events.emit('open-live-contents', cur.contents, cur.name, cur.x, cur.y)
               }},
               { label: 'Pick Up', act: () => {
-                const ba2 = state.bandits[banditIdx]
-                if (!ba2 || !ba2.manacled || state.carriedBandit) return
-                state.carriedBandit = { name: ba2.name, bounty: ba2.bounty, contents: ba2.contents ?? [] }
-                const bs = this.banditSprites[banditIdx]
-                if (bs) bs.destroy()
-                const ms = this.banditManacleSprites[banditIdx]
-                if (ms) ms.destroy()
-                state.bandits.splice(banditIdx, 1)
-                this.banditSprites.splice(banditIdx, 1)
-                this.banditManacleSprites.splice(banditIdx, 1)
-                this.carriedBanditSprite = this.add.sprite(this.player.x, this.player.y - 16, 'player').setScale(PLAYER_SCALE).setDepth(this.player.depth + 1)
-                this.carriedManacleSprite = outlineIcon(this.add.sprite(this.player.x, this.player.y - 16 + BANDIT_MANACLE_ICON_DY, 'item_manacles').setScale(1).setDepth(this.player.depth + 2), COLORS.worldBg)
+                if (this.bandits.pickUpManacled(banditIdx)) {
+                  this.carriedBanditSprite = this.add.sprite(this.player.x, this.player.y - 16, 'player').setScale(PLAYER_SCALE).setDepth(this.player.depth + 1)
+                  this.carriedManacleSprite = outlineIcon(this.add.sprite(this.player.x, this.player.y - 16 + BANDIT_MANACLE_ICON_DY, 'item_manacles').setScale(1).setDepth(this.player.depth + 2), COLORS.worldBg)
+                }
               }},
               { label: 'Remove Manacles', act: () => {
-                const ba2 = state.bandits[banditIdx]
-                if (!ba2 || !ba2.manacled) return
-                ba2.manacled = false
-                const ms = this.banditManacleSprites[banditIdx]
-                if (ms) { ms.destroy(); this.banditManacleSprites[banditIdx] = null }
-                state.inventoryAddAnywhere({ type: 'manacles', count: 1 })
-                this.registry.events.emit('inventory-changed')
+                if (this.bandits.unmanacle(banditIdx)) {
+                  state.inventoryAddAnywhere({ type: 'manacles', count: 1 })
+                  this.registry.events.emit('inventory-changed')
+                }
               }},
             ],
           }
@@ -2253,7 +2449,77 @@ export class Overworld extends Phaser.Scene {
             x: npc.x, y: npc.y, promptDy: -24, rangeSq: npcSq,
             options: [
               { label: 'Talk', act: () => {
-                this.registry.events.emit('open-dialogue', npc.lines)
+                if (npc.graph) {
+                  const g = DIALOGUE_GRAPHS[npc.graph]
+                  if (g) runDialogue(this.registry.events, g, { npcX: npc.x, npcY: npc.y })
+                } else {
+                  this.registry.events.emit('open-dialogue', npc.lines)
+                }
+              }},
+            ],
+          }
+        }
+      }
+      const signSq = 60 * 60
+      for (let i = 0; i < state.trailSigns.length; i++) {
+        const s = state.trailSigns[i]
+        const dx = s.x - px
+        const dy = s.y - py
+        const d = dx * dx + dy * dy
+        if (d <= signSq && d < bestSq) {
+          bestSq = d
+          const sign = s
+          best = {
+            x: sign.x, y: sign.y, promptDy: -20, rangeSq: signSq,
+            options: [
+              { label: 'Read', act: () => {
+                this.registry.events.emit('open-dialogue', [
+                  { header: 'MARCY TRAIL', text: `W - FT. WORTH  ${sign.fwMiles} MI` },
+                  { header: 'MARCY TRAIL', text: `E - LAS SALINAS  ${sign.lsMiles} MI` },
+                ])
+              }},
+            ],
+          }
+        }
+      }
+      const deadTravelerSq = 60 * 60
+      for (let i = 0; i < state.deadTravelers.length; i++) {
+        const dt = state.deadTravelers[i]
+        const dx = dt.x - px
+        const dy = dt.y - py
+        const d = dx * dx + dy * dy
+        if (d <= deadTravelerSq && d < bestSq) {
+          bestSq = d
+          const t = dt
+          best = {
+            x: t.x, y: t.y, promptDy: -14, rangeSq: deadTravelerSq,
+            options: [
+              { label: 'Examine', act: () => {
+                this.registry.events.emit('open-dialogue', [{ header: t.header, text: t.text }])
+              }},
+            ],
+          }
+        }
+      }
+      const crossroadsSq = 70 * 70
+      for (let i = 0; i < state.crossroadsSigns.length; i++) {
+        const s = state.crossroadsSigns[i]
+        const dx = s.x - px
+        const dy = s.y - py
+        const d = dx * dx + dy * dy
+        if (d <= crossroadsSq && d < bestSq) {
+          bestSq = d
+          const sign = s
+          best = {
+            x: sign.x, y: sign.y, promptDy: -30, rangeSq: crossroadsSq,
+            options: [
+              { label: 'Read', act: () => {
+                this.registry.events.emit('open-dialogue', [
+                  { header: 'MARCY TRAIL', text: 'W - FT. WORTH  30 MI' },
+                  { header: 'MARCY TRAIL', text: 'E - LAS SALINAS  100 MI' },
+                  { header: 'PRESTON ROAD', text: 'N - PRESTON  62 MI' },
+                  { header: 'PRESTON ROAD', text: 'S - DALLAS  27 MI' },
+                ])
               }},
             ],
           }
@@ -2278,31 +2544,16 @@ export class Overworld extends Phaser.Scene {
     this.registry.events.emit('close-interact-menu')
   }
 
-  private putDownBandit() {
-    if (!state.carriedBandit) return
-    const ba = createBandit(this.player.x, this.player.y + 16, state.carriedBandit.name, state.carriedBandit.bounty)
-    ba.manacled = true
-    ba.contents = state.carriedBandit.contents
-    ba.active = false
-    state.bandits.push(ba)
-    this.banditSprites.push(
-      this.add.sprite(ba.x, ba.y, 'player').setScale(PLAYER_SCALE).setDepth(ba.y - 8)
-    )
-    this.banditManacleSprites.push(
-      outlineIcon(this.add.sprite(ba.x, ba.y + BANDIT_MANACLE_ICON_DY, 'item_manacles').setScale(1).setDepth(100000), COLORS.worldBg)
-    )
-    state.carriedBandit = null
-    if (this.carriedBanditSprite) { this.carriedBanditSprite.destroy(); this.carriedBanditSprite = null }
-    if (this.carriedManacleSprite) { this.carriedManacleSprite.destroy(); this.carriedManacleSprite = null }
-  }
-
   private openCarryHonseMenu(honseIdx: number) {
     const h = state.honses[honseIdx]
     const target: Interactable = {
       x: h.x, y: h.y, promptDy: -24, rangeSq: MOUNT_RANGE * MOUNT_RANGE,
       options: [
         { label: 'Ride', act: () => {
-          this.putDownBandit()
+          if (this.bandits.putDownCarried(this.player.x, this.player.y + 16)) {
+            if (this.carriedBanditSprite) { this.carriedBanditSprite.destroy(); this.carriedBanditSprite = null }
+            if (this.carriedManacleSprite) { this.carriedManacleSprite.destroy(); this.carriedManacleSprite = null }
+          }
           this.mountNearestHonse()
         }},
         { label: 'Place Bandit', act: () => {
@@ -2574,6 +2825,7 @@ export class Overworld extends Phaser.Scene {
     let bestDist = Infinity
     for (let i = 0; i < state.placedPosts.length; i++) {
       const p = state.placedPosts[i]
+      if (p.protected) continue
       const pdx = wx - p.x
       const pdy = wy - p.y
       const d = pdx * pdx + pdy * pdy
@@ -2624,6 +2876,7 @@ export class Overworld extends Phaser.Scene {
     if (dx * dx + dy * dy > TOOL_RANGE * TOOL_RANGE) return null
     for (let i = 0; i < this.plotViews.length; i++) {
       if (state.plots[i].built === 'empty') continue
+      if (state.plots[i].built === 'depot') continue
       const v = this.plotViews[i]
       if (Math.abs(wx - v.x) < PLOT_SIZE / 2 && Math.abs(wy - v.y) < PLOT_SIZE / 2) return i
     }
@@ -2737,28 +2990,13 @@ export class Overworld extends Phaser.Scene {
   // Axe-destroy a placed post: removes it from state, sprite, and collision,
   // bursts wood particles, and drops the post item where it stood. Returns
   // true if a post was destroyed.
-  private tryAxePost(clickX: number, clickY: number): boolean {
-    const dx = clickX - this.player.x
-    const dy = clickY - this.player.y
-    if (dx * dx + dy * dy > TOOL_RANGE * TOOL_RANGE) return false
-
-    const hitSq = Overworld.POST_HIT_RADIUS * Overworld.POST_HIT_RADIUS
-    let bestIdx = -1
-    let bestDist = Infinity
-    for (let i = 0; i < state.placedPosts.length; i++) {
-      const p = state.placedPosts[i]
-      const pdx = clickX - p.x
-      const pdy = clickY - p.y
-      const d = pdx * pdx + pdy * pdy
-      if (d <= hitSq && d < bestDist) { bestIdx = i; bestDist = d }
-    }
-    if (bestIdx === -1) return false
-
-    const p = state.placedPosts[bestIdx]
+  private destroyPostAt(idx: number): boolean {
+    if (idx < 0 || idx >= state.placedPosts.length) return false
+    const p = state.placedPosts[idx]
+    if (p.protected) return false
     const species = p.species ?? 'post'
     const key = `${p.x},${p.y}`
 
-    // remove the visual
     const sprite = this.placedPostSprites.get(key)
     if (sprite) sprite.destroy()
     this.placedPostSprites.delete(key)
@@ -2768,17 +3006,13 @@ export class Overworld extends Phaser.Scene {
     if (postBody) this.matter.world.remove(postBody)
     this.placedPostBodies.delete(key)
 
-    // remove the collision body — found by the origin stamped on it, so no
-    // geometry has to be recomputed here.
     const obsIdx = this.obstacles.findIndex(
       o => o.kind === 'post' && o.originX === p.x && o.originY === p.y,
     )
     if (obsIdx !== -1) this.obstacles.splice(obsIdx, 1)
 
-    // remove the data
-    state.placedPosts.splice(bestIdx, 1)
+    state.placedPosts.splice(idx, 1)
 
-    // update neighbor sprites (they may switch back from vertical)
     this.refreshPostNeighbors(p.x, p.y)
 
     this.spawnParticles(p.x, p.y, spriteColors(species))
@@ -2786,62 +3020,40 @@ export class Overworld extends Phaser.Scene {
     return true
   }
 
-  // Axe-destroy a placed crate
-  private tryAxeCrate(clickX: number, clickY: number): boolean {
-    const dx = clickX - this.player.x
-    const dy = clickY - this.player.y
-    if (dx * dx + dy * dy > TOOL_RANGE * TOOL_RANGE) return false
+  private tryAxePost(clickX: number, clickY: number): boolean {
+    const idx = this.canDestroyPost(clickX, clickY)
+    if (idx === null) return false
+    return this.destroyPostAt(idx)
+  }
 
-    const hitSq = 26 * 26
-    let best = -1
-    let bestDistSq = hitSq
-    for (let i = 0; i < state.placedCrates.length; i++) {
-      const c = state.placedCrates[i]
-      const cdx = clickX - c.x
-      const cdy = clickY - c.y
-      const distSq = cdx * cdx + cdy * cdy
-      if (distSq <= bestDistSq) {
-        bestDistSq = distSq
-        best = i
-      }
-    }
-    if (best < 0) return false
+  destroyCrateAt(idx: number): boolean {
+    if (idx < 0 || idx >= state.placedCrates.length) return false
+    const c = state.placedCrates[idx]
 
-    const i = best
-    const c = state.placedCrates[i]
-
-    // capture contents + position before we splice the entry away
     const contents = c.contents
     const cx = c.x
     const cy = c.y
 
-    // remove the visual (crates are index-aligned to state.placedCrates)
-    this.crateSprites[i]?.destroy()
-    this.crateSprites.splice(i, 1)
-    // remove the physics body
-    const body = this.crateBodies[i]
+    this.crateSprites[idx]?.destroy()
+    this.crateSprites.splice(idx, 1)
+    const body = this.crateBodies[idx]
     if (body) this.matter.world.remove(body)
-    this.crateBodies.splice(i, 1)
+    this.crateBodies.splice(idx, 1)
 
-    // remove the collision body (found by the stamped origin)
     const obsIdx = this.obstacles.findIndex(
       o => o.kind === 'crate' && o.originX === cx && o.originY === cy,
     )
     if (obsIdx !== -1) this.obstacles.splice(obsIdx, 1)
 
-    // remove the data
-    state.placedCrates.splice(i, 1)
+    state.placedCrates.splice(idx, 1)
 
     this.spawnParticles(cx, cy, spriteColors(ITEMS[(c.item ?? 'crate') as keyof typeof ITEMS].sprite))
 
     const itemType = (c.item ?? 'crate')
     const isLockbox = itemType === 'silver_lockbox' || itemType === 'gold_lockbox'
     if (isLockbox) {
-      // A lockbox is picked up as the SAME box: it carries its unlocked state
-      // and its stored contents on the item stack, and nothing spills out.
       this.dropStack(cx, cy, { type: itemType, count: 1, unlocked: c.unlocked, contents })
     } else {
-      // Crates/chests: the empty container drops back and contents spill around it.
       this.dropStack(cx, cy, { type: itemType, count: 1 })
       for (const stack of contents) {
         if (!stack) continue
@@ -2853,65 +3065,61 @@ export class Overworld extends Phaser.Scene {
     return true
   }
 
+  private tryAxeCrate(clickX: number, clickY: number): boolean {
+    const idx = this.canDestroyCrate(clickX, clickY)
+    if (idx === null) return false
+    return this.destroyCrateAt(idx)
+  }
+
   // Axe/pickaxe-destroy a built plot: tears down the building and reverts the
   // plot to its empty, buildable state. Spills the plot's contents (producer
   // output + workshop craft slots) back to the player via state.clearPlot, but
   // refunds none of the build cost. Returns true if a plot was destroyed.
-  private tryDestroyPlot(clickX: number, clickY: number): boolean {
-    const plotIndex = this.canDestroyPlot(clickX, clickY)
-    if (plotIndex === null) return false
-
+  destroyPlotAt(plotIndex: number): boolean {
+    if (plotIndex < 0 || plotIndex >= state.plots.length) return false
+    const plot = state.plots[plotIndex]
+    if (plot.built === 'empty') return false
     const view = this.plotViews[plotIndex]
 
-    // capture the building's sprite key before clearPlot wipes it — the debris
-    // particles are sampled from this sprite's own colors.
-    const buildingType = state.plots[plotIndex].built
+    const buildingType = plot.built
 
-    // reset state first; it hands back the stacks that were in the plot
     const spill = state.clearPlot(plotIndex)
 
-    // A destroyed building takes its pipes with it. removePipe handles the
-    // visuals, the data, and the drop. Iterate descending so each splice only
-    // shifts entries we've already passed.
     for (let i = state.pipes.length - 1; i >= 0; i--) {
       const p = state.pipes[i]
       if (p.fromPlot === plotIndex || p.toPlot === plotIndex) this.removePipe(i)
     }
 
-    // remove the building sprite
     if (view.building) { view.building.destroy(); view.building = null }
-    // remove the name label
     if (view.nameLabel) { view.nameLabel.destroy(); view.nameLabel = null }
 
-    // remove the static rope-blocker Matter body
     const body = this.plotBlockerBodies.get(plotIndex)
     if (body) this.matter.world.remove(body)
     this.plotBlockerBodies.delete(plotIndex)
 
-    // remove the collision obstacle — the plot's footprint is uniquely located
-    // at (view.x - 24, view.y - 24); world structures share kind 'building' but
-    // never sit at a plot's coordinates, so this matches exactly one obstacle.
     const obsIdx = this.obstacles.findIndex(
       o => o.kind === 'building' && o.x === view.x - 24 && o.y === view.y - 24,
     )
     if (obsIdx !== -1) this.obstacles.splice(obsIdx, 1)
 
-    // bring the '$' price tag back so the plot reads as buildable again. The
-    // plot's interactive rect (and its open-build-menu handler) was never
-    // removed, so it works again the moment built is 'empty'.
     view.priceTag = this.add.bitmapText(view.x, view.y, 'main', '$', FONT.cost)
       .setOrigin(0.5, 0.5)
       .setTint(COLORS.plotPriceTag)
 
     this.spawnParticles(view.x, view.y, spriteColors(buildingType))
 
-    // spill the plot's contents, scattered around it (same pattern as crates)
     for (const stack of spill) {
       const landX = view.x + (Math.random() - 0.5) * 48
       const landY = view.y + (Math.random() - 0.5) * 48
       this.dropStack(landX, landY, stack, view.x)
     }
     return true
+  }
+
+  private tryDestroyPlot(clickX: number, clickY: number): boolean {
+    const plotIndex = this.canDestroyPlot(clickX, clickY)
+    if (plotIndex === null) return false
+    return this.destroyPlotAt(plotIndex)
   }
   private shakeTree(sprite: Phaser.GameObjects.Sprite, baseX: number) {
     this.tweens.killTweensOf(sprite)
@@ -3177,18 +3385,11 @@ export class Overworld extends Phaser.Scene {
   // i-frames; otherwise applies damage, starts the 1s invuln window, and plays
   // the red-blink hurt animation. Every damage source routes through here.
   private static IFRAME_MS = 1000
-  // Per-weapon melee damage to enemies. New weapons (tomahawk 5, etc.) slot in
-  // here as data — the hit logic reads from this, nothing hardcoded per swing.
-  private static WEAPON_DAMAGE: Record<string, number> = { axe: 3, pickaxe: 1 }
-  // Speed of the knockback impulse applied to an enemy on a melee hit.
   private static ENEMY_KNOCKBACK = 250
   // How long the enemy's AI yields to that impulse (the shove duration).
-  private static ENEMY_KNOCKBACK_MS = 200
   // Knockback impulse speed for honses, in Matter body velocity units (the
   // body is driven by setVelocity, a different scale than coyote px/sec).
   private static HONSE_KNOCKBACK_V = 6
-  // Peak height (px) of the little up-and-down hop on a hit, Minecraft-style.
-  private static ENEMY_HOP_H = 8
   // How long the enemy's red hit-flash shows.
   private static ENEMY_HURT_MS = 400
   private static ENEMY_DEATH_MS = 200
@@ -3227,12 +3428,23 @@ export class Overworld extends Phaser.Scene {
           return true
         }
       } else {
-        for (const ref of listEnemies(state.coyotes, state.bandits)) {
+        for (const ref of listEnemies(state.coyotes, [])) {
           if (ref.enemy.dying) continue
           const cdx = b.x - ref.enemy.x
           const cdy = b.y - (ref.enemy.y - 8)
           if (cdx * cdx + cdy * cdy <= hitSq) {
             this.damageEnemy(ref, Overworld.BULLET_DAMAGE, b.x - b.vx, b.y - b.vy, true)
+            return true
+          }
+        }
+        const scoped = this.bandits.scopedBandits()
+        for (let si = 0; si < scoped.length; si++) {
+          const ba = scoped[si]
+          if (ba.dying) continue
+          const cdx = b.x - ba.x
+          const cdy = b.y - (ba.y - 8)
+          if (cdx * cdx + cdy * cdy <= hitSq) {
+            this.bandits.damageBandit(si, Overworld.BULLET_DAMAGE, b.x - b.vx, b.y - b.vy, true, false)
             return true
           }
         }
@@ -3284,7 +3496,7 @@ export class Overworld extends Phaser.Scene {
     let ky = h.y - fromY
     const len = Math.sqrt(kx * kx + ky * ky) || 1
     kx /= len; ky /= len
-    h.knockbackUntil = state.gameTime + Overworld.ENEMY_KNOCKBACK_MS
+    h.knockbackUntil = state.gameTime + ENEMY_KNOCKBACK_MS
     // Honses are Matter bodies — knock them back with an impulse on the body,
     // never by writing position. The body drives h.x/h.y back into state.
     const mb = this.honseBodies[index]
@@ -3972,22 +4184,9 @@ export class Overworld extends Phaser.Scene {
     return true
   }
 
-  private tryAxeGate(clickX: number, clickY: number): boolean {
-    const dx = clickX - this.player.x
-    const dy = clickY - this.player.y
-    if (dx * dx + dy * dy > TOOL_RANGE * TOOL_RANGE) return false
-    const hitSq = 18 * 18
-    let bestIdx = -1
-    let bestDist = Infinity
-    for (let i = 0; i < state.placedGates.length; i++) {
-      const g = state.placedGates[i]
-      const gdx = clickX - g.x
-      const gdy = clickY - g.y
-      const d = gdx * gdx + gdy * gdy
-      if (d <= hitSq && d < bestDist) { bestIdx = i; bestDist = d }
-    }
-    if (bestIdx === -1) return false
-    const g = state.placedGates[bestIdx]
+  private destroyGateAt(idx: number): boolean {
+    if (idx < 0 || idx >= state.placedGates.length) return false
+    const g = state.placedGates[idx]
     const key = `${g.x},${g.y}`
     const sprite = this.placedGateSprites.get(key)
     if (sprite) sprite.destroy()
@@ -3999,11 +4198,17 @@ export class Overworld extends Phaser.Scene {
       o => o.kind === 'gate' && o.originX === g.x && o.originY === g.y,
     )
     if (obsIdx !== -1) this.obstacles.splice(obsIdx, 1)
-    state.placedGates.splice(bestIdx, 1)
+    state.placedGates.splice(idx, 1)
     this.refreshGateNeighbors(g.x, g.y)
     this.spawnParticles(g.x, g.y, spriteColors('item_fence_gate'))
     this.dropStack(g.x, g.y, { type: 'fence_gate', count: 1 })
     return true
+  }
+
+  private tryAxeGate(clickX: number, clickY: number): boolean {
+    const idx = this.canDestroyGate(clickX, clickY)
+    if (idx === null) return false
+    return this.destroyGateAt(idx)
   }
 
   private canDestroyGate(wx: number, wy: number): number | null {
@@ -4155,38 +4360,17 @@ export class Overworld extends Phaser.Scene {
       if (!p.leftButtonDown()) return
       const ui = this.scene.get('UI') as UI
       if (ui.isDialogueOpen()) return
-      const x = sprite.x
-      const y = sprite.y
-      const heldType = state.inventory[state.selectedInventorySlot]?.type
-      if (heldType === 'axe' || heldType === 'pickaxe') {
-        this.tryAxeCrate(x, y)
+      const action = this.resolveOverworldAction(p.worldX, p.worldY)
+      if (!action) return
+      if (action.kind === 'destroy-crate') {
+        this.destroyCrateAt(action.targetIndex)
         return
       }
-      // any other overworld tool held → let it be (don't open)
-      const tool = state.getSelectedTool()
-      const toolHeld = tool !== null && (tool.cursorContexts ?? ['overworld']).includes('overworld')
-      if (toolHeld) return
-      // nothing relevant held → open the crate
-      this.tryOpenCrate(x, y)
+      if (action.kind === 'open-crate') {
+        this.tryOpenCrate(sprite.x, sprite.y)
+        return
+      }
     })
-  }
-
-  // Open the loot panel for the nearest un-carried bandit body within range. The
-  // UI renders the body's contents in the same slot grid the crate uses.
-  private tryLootBody(x: number, y: number, hitRadius = BODY_LOOT_RANGE): boolean {
-    const rSq = hitRadius * hitRadius
-    let bestSq = rSq
-    let bestId = -1
-    for (const b of state.banditBodies) {
-      if (b.carried) continue
-      const dx = b.x - x
-      const dy = b.y - y
-      const d = dx * dx + dy * dy
-      if (d <= bestSq) { bestSq = d; bestId = b.id }
-    }
-    if (bestId === -1) return false
-    this.registry.events.emit('open-body', bestId)
-    return true
   }
 
   private tryOpenCrate(x: number, y: number, hitRadius = 16): boolean {
@@ -4451,6 +4635,14 @@ export class Overworld extends Phaser.Scene {
     if (template.decor) {
       for (const d of template.decor) {
         this.placeVisualDecor(d.sprite, site.x + d.dx, site.y + d.dy, d.scale, d.depth)
+      }
+    }
+    if (template.deadTravelers) {
+      for (const dt of template.deadTravelers) {
+        const wx = site.x + dt.dx
+        const wy = site.y + dt.dy
+        state.deadTravelers.push({ x: wx, y: wy, header: dt.header, text: dt.text, sprite: dt.sprite })
+        this.deadTravelerSprites.push(this.add.sprite(wx, wy, dt.sprite).setScale(2).setDepth(wy))
       }
     }
     if (template.solidDecor) {
@@ -4791,19 +4983,8 @@ export class Overworld extends Phaser.Scene {
     )
   }
 
-  // Placeholder art: reuses the player sprite so the targeting can be tested
-  // before bandit art exists.
-  spawnBandit(x: number, y: number) {
-    const identity = generateBanditName(this.banditIdentityRng)
-    state.bandits.push(createBandit(x, y, identity.name, identity.bounty))
-    this.banditSprites.push(
-      this.add.sprite(x, y, 'player').setScale(PLAYER_SCALE).setDepth(y - 8)
-    )
-    this.banditManacleSprites.push(null)
-  }
-
-  private placePost(x: number, y: number, species: 'post' | 'cedar_post' | 'iron_post' | 'wood_wall', forceVertical = false, rotation = 0) {
-    state.placedPosts.push({ x, y, species })
+  private placePost(x: number, y: number, species: 'post' | 'cedar_post' | 'iron_post' | 'wood_wall', forceVertical = false, rotation = 0, isProtected = false) {
+    state.placedPosts.push({ x, y, species, protected: isProtected })
     this.spawnPostSprite(x, y, species, forceVertical, rotation)
     const obs = this.makePostObstacle(x, y, species)
     this.obstacles.push(obs)
@@ -4813,7 +4994,7 @@ export class Overworld extends Phaser.Scene {
 
   // Places a row of posts from (x1,y1) to (x2,y2), one every `spacing` px.
   // Skips cells already holding a post so shared box corners aren't doubled.
-  private postLine(x1: number, y1: number, x2: number, y2: number, spacing: number, species: 'post' | 'cedar_post' | 'iron_post' | 'wood_wall') {
+  private postLine(x1: number, y1: number, x2: number, y2: number, spacing: number, species: 'post' | 'cedar_post' | 'iron_post' | 'wood_wall', skip?: { x: number; y: number }[], isProtected?: boolean) {
     const dx = x2 - x1, dy = y2 - y1
     const steps = Math.max(1, Math.round(Math.hypot(dx, dy) / spacing))
     const isDiagonal = dx !== 0 && dy !== 0
@@ -4822,17 +5003,18 @@ export class Overworld extends Phaser.Scene {
       const x = Math.round(x1 + (dx * i) / steps)
       const y = Math.round(y1 + (dy * i) / steps)
       if (this.placedPostKeys.has(`${x},${y}`)) continue
-      this.placePost(x, y, species, isDiagonal, rotation)
+      if (skip && skip.some(s => s.x === x && s.y === y)) continue
+      this.placePost(x, y, species, isDiagonal, rotation, isProtected)
     }
   }
 
   // Closed rectangle of posts. Corners are placed once thanks to postLine's
   // dedupe. left/right are x bounds, top/bottom are y bounds.
-  private postBox(left: number, top: number, right: number, bottom: number, spacing: number, species: 'post' | 'cedar_post' | 'iron_post' | 'wood_wall') {
-    this.postLine(left, top, right, top, spacing, species)
-    this.postLine(left, bottom, right, bottom, spacing, species)
-    this.postLine(left, top, left, bottom, spacing, species)
-    this.postLine(right, top, right, bottom, spacing, species)
+  private postBox(left: number, top: number, right: number, bottom: number, spacing: number, species: 'post' | 'cedar_post' | 'iron_post' | 'wood_wall', skip?: { x: number; y: number }[], isProtected?: boolean) {
+    this.postLine(left, top, right, top, spacing, species, skip, isProtected)
+    this.postLine(left, bottom, right, bottom, spacing, species, skip, isProtected)
+    this.postLine(left, top, left, bottom, spacing, species, skip, isProtected)
+    this.postLine(right, top, right, bottom, spacing, species, skip, isProtected)
   }
 
   // ---- Pipe placement ----
@@ -5152,8 +5334,7 @@ export class Overworld extends Phaser.Scene {
       return accepted
     }
 
-    if (plot.built === 'storage' && plot.storageContents) {
-      const slots = plot.storageContents
+    const pushToSlotArray = (slots: (ItemStack | null)[]): number => {
       for (let i = 0; i < slots.length && remaining > 0; i++) {
         const s = slots[i]
         if (s && s.type === type && s.rarity === source.rarity && s.count < cap) {
@@ -5170,6 +5351,14 @@ export class Overworld extends Phaser.Scene {
         }
       }
       return accepted
+    }
+
+    if (plot.built === 'storage' && plot.storageContents) {
+      return pushToSlotArray(plot.storageContents)
+    }
+
+    if (plot.built === 'depot' && plot.depotContents) {
+      return pushToSlotArray(plot.depotContents)
     }
 
     if (plot.built === 'empty') return 0
@@ -5792,7 +5981,7 @@ export class Overworld extends Phaser.Scene {
       for (let ti = 0; ti < this.troopers.length; ti++) {
         const t = this.troopers[ti]
         if (t.getData('stationary')) {
-          t.setTexture('cavalry_trooper')
+          t.setTexture(t.getData('baseSprite') ?? 'cavalry_trooper')
           continue
         }
         t.setTexture(trooperTex)
@@ -5828,22 +6017,8 @@ export class Overworld extends Phaser.Scene {
     const growMs = Overworld.SAPLING_GROW_MS / Math.max(0.01, state.timeMultiplier)
     for (const t of state.plantedTrees) {
       if (t.stage !== 'sapling' || t.plantedAt === undefined) continue
-      // Salt basin won't let a sapling take — it only matures on grass.
       if (state.terrainAt(t.x, t.y) !== Terrain.Grass) continue
       if (state.gameTime - t.plantedAt >= growMs) this.growSapling(t)
-    }
-
-    // Spawn the starter honse trio when hemp is first harvested. Gated only by
-    // honsesSpawned (fires once) — NOT by honses.length, because the wild herd
-    // is seed-placed at world creation, so honses.length is never 0 by the time
-    // hemp is harvested. (That stale === 0 guard previously blocked the trio
-    // entirely once the herd existed.)
-    if (state.hasHarvestedHemp && !this.honsesSpawned) {
-      this.honsesSpawned = true
-      const spawns: [number, number][] = [[2700, 2240], [2780, 2300], [2640, 2190]]
-      for (const [sx, sy] of spawns) {
-        this.spawnHonse(sx, sy)
-      }
     }
 
     const leaderMap = state.mounted !== null
@@ -5895,25 +6070,7 @@ export class Overworld extends Phaser.Scene {
     // systems belong inside this guard too.
     if (state.playerInWorld) {
       updateCoyotes(state.coyotes, dt, state.gameTime, (px, py) => this.collidesAt(px, py, undefined, true), { x: this.player.x, y: this.player.y }, (i) => this.rope.getCoyoteTetherAnchor(i), state.mounted !== null, this.playerInSafeZone())
-      updateBandits(
-        state.bandits,
-        dt,
-        state.gameTime,
-        (px, py) => this.collidesAt(px, py, undefined, true),
-        // line-of-sight: same obstacles but honses ignored, so a horse is never cover
-        (px, py) => this.collidesAt(px, py, undefined, true, true),
-        { x: this.player.x, y: this.player.y, vx: this.playerVX, vy: this.playerVY },
-        BULLET_SPEED,
-        (bi, dx, dy) => {
-          const ba = state.bandits[bi]
-          this.fireBanditBullet(ba.x, ba.y + BANDIT_MUZZLE_DY, dx, dy)
-        },
-        // Threats he can dodge: the player's own bullets in flight.
-        this.gun.bullets.filter(bl => !bl.fromBandit).map(bl => ({ x: bl.x, y: bl.y, vx: bl.vx, vy: bl.vy })),
-        this.banditRng,
-        (i) => this.rope.getBanditTetherAnchor(i),
-        this.playerInSafeZone(),
-      )
+      this.bandits.update(dt)
       this.updateBullets(dt)
       // Coyote bite: player within bite radius of a coyote's mouth takes damage,
       // gated per-coyote by a cooldown. Roped coyotes flee and don't bite.
@@ -6165,8 +6322,8 @@ export class Overworld extends Phaser.Scene {
       // sorts on the ground position so the hop doesn't reorder the sprite.
       let hop = 0
       if (state.gameTime < c.knockbackUntil) {
-        const t = 1 - (c.knockbackUntil - state.gameTime) / Overworld.ENEMY_KNOCKBACK_MS
-        hop = Math.sin(t * Math.PI) * Overworld.ENEMY_HOP_H
+        const t = 1 - (c.knockbackUntil - state.gameTime) / ENEMY_KNOCKBACK_MS
+        hop = Math.sin(t * Math.PI) * ENEMY_HOP_H
       }
       s.y = c.y - hop
       s.setDepth(c.y - 8)
@@ -6185,49 +6342,7 @@ export class Overworld extends Phaser.Scene {
       }
     }
 
-    for (let i = 0; i < state.bandits.length; i++) {
-      const ba = state.bandits[i]
-      const s = this.banditSprites[i]
-      if (!s) continue
-      s.x = ba.x
-      let hop = 0
-      if (state.gameTime < ba.knockbackUntil) {
-        const t = 1 - (ba.knockbackUntil - state.gameTime) / Overworld.ENEMY_KNOCKBACK_MS
-        hop = Math.sin(t * Math.PI) * Overworld.ENEMY_HOP_H
-      }
-      s.y = ba.y - hop
-      s.setDepth(ba.y - 8)
-      s.setFlipX(!ba.facingRight)
-      s.setTint(state.gameTime < ba.hurtUntil ? 0xFF3030 : 0xFFFFFF)
-      const m = this.banditManacleSprites[i]
-      if (m) {
-        m.x = ba.x
-        m.y = ba.y + BANDIT_MANACLE_ICON_DY - hop
-        m.setDepth(ba.y - 7)
-        m.setFlipX(!ba.facingRight)
-      }
-      if (ba.dying && state.gameTime >= ba.hurtUntil) {
-        s.destroy()
-        if (m) {
-          m.destroy()
-          this.dropStack(ba.x, ba.y, { type: 'manacles', count: 1 })
-        }
-        this.banditManacleSprites.splice(i, 1)
-        this.banditSprites.splice(i, 1)
-        state.bandits.splice(i, 1)
-        const id = state.nextBanditBodyId++
-        const contents = ba.contents ?? generateBanditLoot(this.lootRng)
-        state.banditBodies.push({ id, x: ba.x, y: ba.y, carried: false, contents, name: ba.name, bounty: ba.bounty })
-        this.banditBodySprites.push(
-          this.add.sprite(ba.x, ba.y, 'bandit_dead').setScale(2).setDepth(ba.y - 8)
-        )
-        i--
-        continue
-      }
-    }
-
-
-    // Sync dynamic crate bodies  
+    // Sync dynamic crate bodies    
     for (let i = 0; i < this.crateBodies.length; i++) {
       const body = this.crateBodies[i]
       if (!body || body.isSleeping) continue
@@ -6321,7 +6436,10 @@ export class Overworld extends Phaser.Scene {
         if (nearHonse !== null) {
           this.openCarryHonseMenu(nearHonse)
         } else {
-          this.putDownBandit()
+          if (this.bandits.putDownCarried(this.player.x, this.player.y + 16)) {
+            if (this.carriedBanditSprite) { this.carriedBanditSprite.destroy(); this.carriedBanditSprite = null }
+            if (this.carriedManacleSprite) { this.carriedManacleSprite.destroy(); this.carriedManacleSprite = null }
+          }
         }
       } else if (this.interactMenuTarget) {
         if (ui.isCrateOpen()) ui.closeCrate()
@@ -6740,6 +6858,14 @@ export class Overworld extends Phaser.Scene {
           ? (px - s.x) >= -16 && (px - s.x) <= 26 && Math.abs(py - s.y) < 42
           : s.type === 'abandoned_house'
           ? (px - s.x) >= -26 && (px - s.x) <= 19 && Math.abs(py - s.y) < 16
+          : s.type === 'barracks' && s.door
+          ? (() => {
+              const scale = 2.25
+              const w = 65 * scale
+              const dx = s.door.side === 'east' ? s.x + w / 2 - 2 : s.door.side === 'west' ? s.x - w / 2 + 2 : s.x
+              const dy = s.door.side === 'north' || s.door.side === 'south' ? s.y : s.y + s.door.offset
+              return Math.abs(px - dx) < 20 && Math.abs(py - dy) < 20
+            })()
           : Math.abs(px - s.x) < 16 && Math.abs(py - s.y) < 16
       )
       if (inZone) {
@@ -6855,15 +6981,253 @@ export class Overworld extends Phaser.Scene {
     // ---- pipe item transfer ----
     this.runPipeTicks(now)
 
-    // ---- safe zone / combat ---- hearts show outside any safe zone
-    const px2 = this.player.x, py2 = this.player.y
-    let inSafe = false
-    for (const z of this.safeZones) {
-      if (px2 >= z.x && px2 <= z.x + z.w && py2 >= z.y && py2 <= z.y + z.h) { inSafe = true; break }
+    if (!state.heartsRevealed) {
+      const px2 = this.player.x, py2 = this.player.y
+      let inSafe = false
+      for (const z of this.safeZones) {
+        if (px2 >= z.x && px2 <= z.x + z.w && py2 >= z.y && py2 <= z.y + z.h) { inSafe = true; break }
+      }
+      if (!inSafe) {
+        state.heartsRevealed = true
+        this.inCombat = true
+        this.registry.set('inCombat', true)
+      }
     }
-    if (inSafe === this.inCombat) {
-      this.inCombat = !inSafe
-      this.registry.set('inCombat', this.inCombat)
+
+    this.updateLieutenants()
+    this.checkDepotOrders()
+    state.expireTempHearts(this.registry)
+  }
+
+  private moveLieutenantToward(lt: Overworld['lieutenants'][number], tx: number, ty: number, speed: number): number {
+    const dx = tx - lt.sprite.x
+    const dy = ty - lt.sprite.y
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    if (dist < 0.001) return dist
+    const step = Math.min(speed, dist)
+    const nx = dx / dist, ny = dy / dist
+    lt.sprite.x += nx * step
+    lt.sprite.y += ny * step
+    lt.mount.x = lt.sprite.x
+    lt.mount.y = lt.sprite.y + LT_MOUNT_OFFSET_Y
+    lt.shadow.x = lt.sprite.x
+    lt.shadow.y = lt.mount.y + LT_SHADOW_OFFSET_Y
+    lt.sprite.setDepth(lt.sprite.y)
+    lt.mount.setDepth(lt.sprite.y - 1)
+    lt.shadow.setDepth(lt.sprite.y - 2)
+    lt.sprite.setFlipX(nx < 0)
+    lt.mount.setFlipX(nx >= 0)
+    return dist
+  }
+
+  private nearestPatrolIndex(lt: Overworld['lieutenants'][number]): number {
+    if (lt.patrol.length === 0) return 0
+    let best = 0
+    let bestDist = Infinity
+    for (let i = 0; i < lt.patrol.length; i++) {
+      const wp = lt.patrol[i]
+      const dx = wp.x - lt.sprite.x
+      const dy = wp.y - lt.sprite.y
+      const d = dx * dx + dy * dy
+      if (d < bestDist) { best = i; bestDist = d }
+    }
+    return best
+  }
+
+  private buildDepotBubbles(plotIndex: number) {
+    const old = this.depotBubbles.get(plotIndex)
+    if (old) { old.destroy(); this.depotBubbles.delete(plotIndex) }
+    const plot = state.plots[plotIndex]
+    if (!plot.depotOrder || plot.depotOrder.length === 0) return
+    const view = this.plotViews[plotIndex]
+    const bubbleY = view.y - 76
+    const spacing = 44
+    const totalW = (plot.depotOrder.length - 1) * spacing
+    const container = this.add.container(view.x, bubbleY).setDepth(100000)
+    for (let i = 0; i < plot.depotOrder.length; i++) {
+      const req = plot.depotOrder[i]
+      const def = ITEMS[req.type]
+      const bx = -totalW / 2 + i * spacing
+      const shadowOff = 2
+      const bgShadow = this.add.ellipse(bx + shadowOff, shadowOff, 52, 36, 0x808080).setOrigin(0.5, 0.5).setAlpha(0.3)
+      const tailShadowW = 4
+      const tailShadowH = 5
+      const tailShadow = this.add.triangle(bx + shadowOff, 18 + shadowOff, -tailShadowW, 0, tailShadowW, 0, 0, tailShadowH, 0x808080).setOrigin(0.5, 0).setAlpha(0.3)
+      const bg = this.add.ellipse(bx, 0, 52, 36, 0xffffff).setOrigin(0.5, 0.5)
+      const tailW = 4
+      const tailH = 5
+      const tail = this.add.triangle(bx, 18, -tailW, 0, tailW, 0, 0, tailH, 0xffffff).setOrigin(0.5, 0)
+      const icon = this.add.sprite(bx, 0, def.sprite).setScale(def.scale)
+      container.add([bgShadow, tailShadow, bg, tail, icon])
+    }
+    this.depotBubbles.set(plotIndex, container)
+  }
+
+  private checkDepotOrders() {
+    for (let i = 0; i < state.plots.length; i++) {
+      const plot = state.plots[i]
+      if (plot.built !== 'depot' || !plot.depotOrder || !plot.depotContents) continue
+      let fulfilled = true
+      for (const req of plot.depotOrder) {
+        let have = 0
+        for (const slot of plot.depotContents) {
+          if (slot && slot.type === req.type) have += slot.count
+        }
+        if (have < req.count) { fulfilled = false; break }
+      }
+      if (!fulfilled) continue
+      for (const req of plot.depotOrder) {
+        let need = req.count
+        for (let s = 0; s < plot.depotContents.length && need > 0; s++) {
+          const slot = plot.depotContents[s]
+          if (!slot || slot.type !== req.type) continue
+          const take = Math.min(slot.count, need)
+          slot.count -= take
+          need -= take
+          if (slot.count <= 0) plot.depotContents[s] = null
+        }
+      }
+      let payout = 0
+      for (const req of plot.depotOrder) {
+        const sellPrice = ITEMS[req.type].sellPrice ?? 0
+        payout += sellPrice * req.count
+      }
+      state.addGold(payout, this.registry)
+      const view = this.plotViews[i]
+      this.spawnParticles(view.x, view.y - 20, [0xFFD700, 0xDAA520, 0xB8860B])
+      plot.depotOrder = rollDepotOrder()
+      this.buildDepotBubbles(i)
+    }
+  }
+
+  private executeWorldCommand(cmd: WorldCommand) {
+    const entry = this.scriptedNpcs.get(cmd.npcId)
+    if (!entry) return
+    if (cmd.kind === 'npc_set_sprite') {
+      entry.sprite.setData('baseSprite', cmd.sprite)
+      entry.sprite.setTexture(cmd.sprite)
+      return
+    }
+    if (cmd.kind === 'npc_walk_to') {
+      const speed = cmd.speed ?? 60
+      const dx = cmd.x - entry.sprite.x
+      const dy = cmd.y - entry.sprite.y
+      const dist = Math.hypot(dx, dy)
+      const duration = (dist / speed) * 1000
+      entry.sprite.setFlipX(dx < 0)
+      const then = cmd.then
+      this.tweens.add({
+        targets: entry.sprite,
+        x: cmd.x, y: cmd.y,
+        duration,
+        onUpdate: () => { entry.sprite.setDepth(entry.sprite.y) },
+        onComplete: () => { if (then) this.executeWorldCommand(then) },
+      })
+      this.tweens.add({
+        targets: entry.shadow,
+        x: cmd.x, y: cmd.y + 18,
+        duration,
+        onUpdate: () => { entry.shadow.setDepth(entry.shadow.y - 1) },
+      })
+      return
+    }
+    if (cmd.kind === 'npc_despawn') {
+      entry.sprite.setVisible(false)
+      entry.shadow.setVisible(false)
+      if (entry.obstacle) {
+        const idx = this.obstacles.indexOf(entry.obstacle)
+        if (idx >= 0) this.obstacles.splice(idx, 1)
+      }
+      if (entry.body) this.matter.world.remove(entry.body)
+      const npcIdx = state.npcs.findIndex(n => n.x === entry.spawnX && n.y === entry.spawnY)
+      if (npcIdx >= 0) state.npcs.splice(npcIdx, 1)
+      this.scriptedNpcs.delete(cmd.npcId)
+      return
+    }
+  }
+
+  private updateLieutenants() {
+    if (this.preInteriorPos) return
+    for (const lt of this.lieutenants) {
+      const zone = this.safeZones[lt.safeZoneIndex]
+      if (!zone) continue
+      const px = this.player.x, py = this.player.y
+      const insideZone = px >= zone.x && px <= zone.x + zone.w && py >= zone.y && py <= zone.y + zone.h
+
+      if (lt.mode === 'patrol') {
+        if (lt.patrol.length > 0) {
+          const wp = lt.patrol[lt.patrolIndex]
+          const dist = this.moveLieutenantToward(lt, wp.x, wp.y, LT_PATROL_SPEED)
+          if (dist < 4) {
+            lt.patrolIndex = (lt.patrolIndex + 1) % lt.patrol.length
+          }
+        }
+        if (insideZone && !(lt.oneTime && lt.intercepted)) {
+          lt.mode = 'intercept'
+        }
+      }
+
+      if (lt.mode === 'intercept') {
+        if (!insideZone) {
+          lt.mode = 'return'
+        } else {
+          const dx = px - lt.sprite.x
+          const dy = py - lt.sprite.y
+          const dist = Math.sqrt(dx * dx + dy * dy)
+          if (dist < 120) {
+          lt.mode = 'talk'
+          const ui = this.scene.get('UI') as UI
+          if (!ui.isDialogueOpen()) {
+            const farewellLine = { text: 'Good day to you.', speaker: 'Lt. Harrison' }
+            const closingLines = [
+              { text: "I'd advise you to call on Major Arnold before you push any further west, sir. There was a Comanche party near the Brazos not a week ago.", speaker: 'Lt. Harrison' },
+              { text: "They took stock from a family on Denton Creek. If you're bound out that way I'd suggest waiting on a party going the same road.", speaker: 'Lt. Harrison', options: [
+                { label: 'Thanks.', act: () => this.registry.events.emit('open-dialogue', [farewellLine]) },
+                { label: '...', act: () => this.registry.events.emit('open-dialogue', [farewellLine]) },
+              ]},
+            ]
+            const afterWestPointers = [
+              { text: 'Both of us strange men in a strange country. What is your business?', speaker: 'Lt. Harrison', options: [
+                { label: "I'm settling nearby.", act: () => this.registry.events.emit('open-dialogue', closingLines) },
+                { label: 'Just doing business.', act: () => this.registry.events.emit('open-dialogue', closingLines) },
+              ]},
+            ]
+            this.registry.events.emit('open-dialogue', [
+              { text: 'Good morning, sir. Lieutenant Harrison, Second Dragoons. May I ask your business at this post?', speaker: 'Lt. Harrison', options: [
+                { label: 'West Pointers. I never.', act: () => this.registry.events.emit('open-dialogue', afterWestPointers) },
+                { label: "I'm settling nearby.", act: () => this.registry.events.emit('open-dialogue', closingLines) },
+                { label: 'Just doing business.', act: () => this.registry.events.emit('open-dialogue', closingLines) },
+              ]},
+            ])
+          }
+        } else {
+          this.moveLieutenantToward(lt, px, py, LT_RIDE_SPEED)
+        }
+        }
+      }
+
+      if (lt.mode === 'talk') {
+        const ui = this.scene.get('UI') as UI
+        if (!ui.isDialogueOpen()) {
+          state.lieutenantInterceptedFW = true
+          lt.intercepted = true
+          lt.mode = 'return'
+        }
+      }
+
+      if (lt.mode === 'return') {
+        if (lt.patrol.length > 0) {
+          const target = lt.patrol[lt.patrolIndex]
+          const dist = this.moveLieutenantToward(lt, target.x, target.y, LT_RIDE_SPEED)
+          if (dist < 4) {
+            lt.patrolIndex = this.nearestPatrolIndex(lt)
+            lt.mode = 'patrol'
+          }
+        } else {
+          const dist = this.moveLieutenantToward(lt, lt.homeX, lt.homeY, LT_RIDE_SPEED)
+          if (dist < 4) lt.mode = 'patrol'
+        }
+      }
     }
   }
 }

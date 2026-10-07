@@ -1,7 +1,9 @@
 import Phaser from 'phaser'
 import { addPanelTitle } from '../panelTitle'
 import { COLORS, FONT } from '../colors'
-import { BUILDINGS, state, getUpgradeCost, getEffectiveTickMs, getStorageCap, getStorageSlotCount, STORAGE_COLS, WORLD_WELL_CAP, FIELD_COLS, FIELD_ROWS, makeEmptyFieldCells, type BuiltType } from '../game/state'
+import { BUILDINGS, state, getUpgradeCost, getEffectiveTickMs, getStorageCap, getStorageSlotCount, STORAGE_COLS, WORLD_WELL_CAP, FIELD_COLS, FIELD_ROWS, makeEmptyFieldCells, DEPOT_SLOT_COUNT, type BuiltType } from '../game/state'
+import { runDialogue } from '../game/dialogue/runner'
+import { DIALOGUE_GRAPHS } from '../game/dialogue'
 import { ITEMS, type ItemStack, type ItemType } from '../items/types'
 import { ensureSmelt } from '../game/smelting'
 import { consumeCraft, previewCraft } from '../items/recipes'
@@ -30,6 +32,7 @@ import { buildGunsmithInterior } from './GunsmithInterior'
 import { buildMercantileInterior } from './MercantileInterior'
 import { buildLiveryInterior } from './LiveryInterior'
 import { INTERIOR_PALETTES } from './InteriorBackdrop'
+import { attachInteriorBandits } from './InteriorBanditEncounter'
 
 export type InteriorData =
   | { source: 'plot'; buildingType: BuiltType; plotIndex: number }
@@ -298,7 +301,7 @@ export class Interior extends Phaser.Scene {
     // ---- back button + keyboard exits ----
     // Walkable interiors (abandoned house, future barns) require the player
     // to physically walk out — no back button, no ESC/E exits.
-    const isWalkable = this.interiorData.source === 'world' && (this.interiorData.buildingType === 'abandoned_house' || this.interiorData.buildingType === 'long_house' || this.interiorData.buildingType === 'church' || this.interiorData.buildingType === 'church_bell' || this.interiorData.buildingType === 'church_bell_back')
+    const isWalkable = this.interiorData.source === 'world' && (this.interiorData.buildingType === 'abandoned_house' || this.interiorData.buildingType === 'long_house' || this.interiorData.buildingType === 'church' || this.interiorData.buildingType === 'church_bell' || this.interiorData.buildingType === 'church_bell_back' || this.interiorData.buildingType === 'sheriff_office' || this.interiorData.buildingType === 'barracks')
     if (!isWalkable) {
       // Plot + world-well popups close by clicking the shade or ESC/E, so they
       // get no on-screen Back button. Other interiors keep it.
@@ -337,10 +340,6 @@ export class Interior extends Phaser.Scene {
       const handle = buildShopInterior(this, this.interiorData.structureIndex)
       this.moduleCleanups.push(handle.onCleanup)
     } else if (this.interiorData.buildingType === 'abandoned_house') {
-      // Loot: if this instance carries its own list (procedurally-placed
-      // houses do, even an empty []), use it. Otherwise fall back to the
-      // authored in-town house's default hemp loadout. This is what lets the
-      // scattered frontier houses be empty while the original keeps its hemp.
       const defaultHemp = [
         { x: 0.3, y: 0.35, type: 'hemp' as const, count: 2 },
         { x: 0.65, y: 0.55, type: 'hemp' as const, count: 2 },
@@ -348,37 +347,61 @@ export class Interior extends Phaser.Scene {
         { x: 0.4, y: 0.7, type: 'hemp' as const, count: 2 },
       ]
       const loot = this.interiorData.loot ?? defaultHemp
+      const structureIndex = this.interiorData.structureIndex
+      const stateKey = `abandoned_house:${structureIndex}`
+
       const handle = buildWalkableInterior(this, {
-        stateKey: `abandoned_house:${this.interiorData.structureIndex}`,
+        stateKey,
         ...INTERIOR_PALETTES.abandonedHouse,
         wallColor: 0xc1af9d,
         floorTexture: 'floor_wood',
         floorTextureScale: 4,
         initialItems: loot as { x: number; y: number; type: ItemType; count?: number }[],
-        crateSeed: state.worldSeed + this.interiorData.structureIndex,
+        crateSeed: state.worldSeed + structureIndex,
         crateSpawnChance: 1,
-        // Seeded loot-table roll for the chest contents. Offset the seed from the
-        // spawn-chance seed so "does a chest exist" and "what's inside" are
-        // independent rolls, still deterministic per house + world.
-        crateContents: rollAbandonedHouseChest(state.worldSeed + this.interiorData.structureIndex * 31 + 7),
+        crateContents: rollAbandonedHouseChest(state.worldSeed + structureIndex * 31 + 7),
         cratePos: { x: 0.5, y: 0.3 },
       }, () => this.exit())
-      this.moduleUpdates.push(() => handle.update(this.game.loop.delta))
-      this.moduleCleanups.push(handle.onCleanup)
+
+      attachInteriorBandits(this, handle, stateKey, structureIndex, this.moduleUpdates, this.moduleCleanups)
+
     } else if (this.interiorData.buildingType === 'long_house') {
       const loot = this.interiorData.loot ?? []
+      const structureIndex = this.interiorData.structureIndex
+      const stateKey = `long_house:${structureIndex}`
       const handle = buildWalkableInterior(this, {
-        stateKey: `long_house:${this.interiorData.structureIndex}`,
+        stateKey,
         ...INTERIOR_PALETTES.longHouse,
         wallColor: 0xc1af9d,
         floorTexture: 'floor_wood',
         floorTextureScale: 4,
         doorSide: this.interiorData.flipX ? 'left' : 'right',
         initialItems: loot as { x: number; y: number; type: ItemType; count?: number }[],
-        crateSeed: state.worldSeed + this.interiorData.structureIndex,
+        crateSeed: state.worldSeed + structureIndex,
         crateSpawnChance: 1,
-        crateContents: rollAbandonedHouseChest(state.worldSeed + this.interiorData.structureIndex * 31 + 7),
+        crateContents: rollAbandonedHouseChest(state.worldSeed + structureIndex * 31 + 7),
         cratePos: { x: 0.5, y: 0.3 },
+      }, () => this.exit())
+      attachInteriorBandits(this, handle, stateKey, structureIndex, this.moduleUpdates, this.moduleCleanups)
+    } else if (this.interiorData.buildingType === 'barracks') {
+      const loot = this.interiorData.loot ?? []
+      const trooperDialogue = () => {
+        const ui = this.scene.get('UI') as UI
+        if (ui.isDialogueOpen()) return
+        runDialogue(this.registry.events, DIALOGUE_GRAPHS.barracks_trooper_inside, {})
+      }
+      const handle = buildWalkableInterior(this, {
+        stateKey: `barracks:${this.interiorData.structureIndex}`,
+        ...INTERIOR_PALETTES.barracks,
+        floorTexture: 'floor_wood',
+        floorTextureScale: 4,
+        doorSide: 'right',
+        initialItems: loot as { x: number; y: number; type: ItemType; count?: number }[],
+        props: {
+          npcs: [
+            { sprite: 'cavalry_trooper_leaning', x: 0.986, y: 0.191, faceLeft: true, onInteract: trooperDialogue },
+          ],
+        },
       }, () => this.exit())
       this.moduleUpdates.push(() => handle.update(this.game.loop.delta))
       this.moduleCleanups.push(handle.onCleanup)
@@ -420,6 +443,51 @@ export class Interior extends Phaser.Scene {
         roomWidth: 0.6,
         roomHeight: 1.4,
         carpet: true,
+      }, () => this.exit())
+      this.moduleUpdates.push(() => handle.update(this.game.loop.delta))
+      this.moduleCleanups.push(handle.onCleanup)
+    } else if (this.interiorData.buildingType === 'sheriff_office') {
+      const sheriffDialogue = () => {
+        const ui = this.scene.get('UI') as UI
+        if (ui.isDialogueOpen()) return
+        if (!state.deputized) {
+          this.registry.events.emit('open-dialogue', [
+            { text: 'Stranger. You look like a man who could hold his own.', speaker: 'Sheriff' },
+            { text: 'I could use a hand bringing outlaws in alive. Deputize you on the spot. Interested?', speaker: 'Sheriff', options: [
+              { label: 'Yes', act: () => {
+                state.deputized = true
+                state.inventoryAddAnywhere({ type: 'manacles', count: 1 })
+                this.registry.events.emit('inventory-changed')
+                this.registry.events.emit('open-dialogue', [
+                  { text: 'Good man. Take these manacles. Bring me the ones with prices on their heads.', speaker: 'Sheriff' },
+                ])
+              }},
+              { label: 'No', act: () => {
+                this.registry.events.emit('open-dialogue', [
+                  { text: 'Suit yourself.', speaker: 'Sheriff' },
+                ])
+              }},
+            ]},
+          ])
+        } else {
+          this.registry.events.emit('open-dialogue', [
+            { text: 'Deputy. Bring me any outlaws you catch.', speaker: 'Sheriff' },
+          ])
+        }
+      }
+      const handle = buildWalkableInterior(this, {
+        stateKey: `sheriff_office:${this.interiorData.structureIndex}`,
+        floorColor: 0x8a6b4b,
+        wallColor: 0xc1af9d,
+        floorTexture: 'floor_wood',
+        floorTextureScale: 4,
+        roomWidth: 0.55,
+        roomHeight: 0.9,
+        props: {
+          npcs: [
+            { sprite: 'player', x: 0.5, y: 0.35, onInteract: sheriffDialogue },
+          ],
+        },
       }, () => this.exit())
       this.moduleUpdates.push(() => handle.update(this.game.loop.delta))
       this.moduleCleanups.push(handle.onCleanup)
@@ -481,6 +549,9 @@ export class Interior extends Phaser.Scene {
       const slotCount = getStorageSlotCount(plot.level)
       const rows = Math.ceil(slotCount / STORAGE_COLS)
       CONTENT_H = rows * SLOT + (rows - 1) * SLOT_GAP + 24
+    } else if (buildingType === 'depot') {
+      const rows = Math.ceil(DEPOT_SLOT_COUNT / STORAGE_COLS)
+      CONTENT_H = rows * SLOT + (rows - 1) * SLOT_GAP + 24
     } else if (buildingType === 'smelter' || buildingType === 'blast_furnace') {
       CONTENT_H = 220
     }
@@ -501,7 +572,7 @@ export class Interior extends Phaser.Scene {
     // ---- title ----
     const titleY = panelY - panelH / 2 + PANEL_PAD + 14
     addPanelTitle(this, panelX, titleY, def.name, COLORS.worldBg)
-    const titleLevelText = this.add.bitmapText(panelX, titleY + 22, 'mainSmall', `Level ${plot.level}`, FONT.desc)
+    const titleLevelText = this.add.bitmapText(panelX, titleY + 22, 'mainSmall', buildingType === 'depot' ? '' : `Level ${plot.level}`, FONT.desc)
       .setOrigin(0.5, 0.5).setTint(COLORS.uiText)
 
     // ---- tab bar ----
@@ -509,6 +580,8 @@ export class Interior extends Phaser.Scene {
       ? ['Production', 'Upgrades', 'Info']
       : buildingType === 'storage'
       ? ['Storage', 'Upgrades', 'Info']
+      : buildingType === 'depot'
+      ? ['Depot', 'Info']
       : ['Production', 'Upgrades', 'Info']
     const tabY = panelY - panelH / 2 + PANEL_PAD + TITLE_H + TAB_BAR_H / 2
     const tabW = (PANEL_W - PANEL_PAD * 2) / tabNames.length
@@ -578,17 +651,22 @@ export class Interior extends Phaser.Scene {
       this.bindings.push(...handle.bindings)
       this.slotVisuals.push(...handle.slotVisuals)
       this.moduleUpdates.push(handle.update)
-    } else if (buildingType === 'storage') {
-      // Storage tab: crate-like grid of slots
+    } else if (buildingType === 'storage' || buildingType === 'depot') {
       const ui = this.scene.get('UI') as UI
       const dc = ui.getDragController()
 
-      // Track this build's bindings/visuals so we can splice them out on rebuild.
       let ownedBindings: SlotBinding[] = []
       let ownedVisuals: SlotVisual[] = []
 
-      const buildStorageGrid = () => {
-        const slotCount = getStorageSlotCount(plot.level)
+      const getSlotCount = () => buildingType === 'depot'
+        ? DEPOT_SLOT_COUNT
+        : getStorageSlotCount(plot.level)
+      const getSlotArray = (): (ItemStack | null)[] => buildingType === 'depot'
+        ? plot.depotContents!
+        : plot.storageContents!
+
+      const buildSlotGrid = () => {
+        const slotCount = getSlotCount()
         const cols = STORAGE_COLS
         const rows = Math.ceil(slotCount / cols)
         const gridW = cols * SLOT + (cols - 1) * SLOT_GAP
@@ -601,9 +679,9 @@ export class Interior extends Phaser.Scene {
           const row = Math.floor(i / cols)
           const slotX = gridStartX + col * (SLOT + SLOT_GAP)
           const slotY = gridStartY + row * (SLOT + SLOT_GAP)
-          const getStack = () => plot.storageContents![i] ?? null
+          const getStack = () => getSlotArray()[i] ?? null
           const slotImg = makeSlotImage(this, { x: slotX, y: slotY, peek: getStack, tooltipOffsetY: -44 })
-          const setStack = (s: ItemStack | null) => { plot.storageContents![i] = s }
+          const setStack = (s: ItemStack | null) => { getSlotArray()[i] = s }
           const sv: SlotVisual = { x: slotX, y: slotY, getStack, icon: null, count: null, lastType: null, lastCount: 0, container: productionContainer }
           this.slotVisuals.push(sv)
           ownedVisuals.push(sv)
@@ -622,7 +700,7 @@ export class Interior extends Phaser.Scene {
         }
       }
 
-      buildStorageGrid()
+      buildSlotGrid()
 
       this.rebuildProduction = () => {
         for (const b of ownedBindings) {
@@ -635,7 +713,7 @@ export class Interior extends Phaser.Scene {
         ownedBindings = []
         ownedVisuals = []
         productionContainer.removeAll(true)
-        buildStorageGrid()
+        buildSlotGrid()
       }
     } else if (BUILDINGS[buildingType].smelting) {
       const ui = this.scene.get('UI') as UI
@@ -662,6 +740,7 @@ export class Interior extends Phaser.Scene {
       }
     }
 
+    if (buildingType !== 'depot') {
     // -- UPGRADES tab (1) -- built for all building types
     {
       const upgradesContainer = this.add.container(0, 0).setVisible(false)
@@ -870,7 +949,9 @@ export class Interior extends Phaser.Scene {
       })
     }
 
-    // -- INFO tab (2) --
+    }
+
+    // -- INFO tab --
     const infoContainer = this.add.container(0, 0).setVisible(false)
     tabContainers.push(infoContainer)
     {
@@ -899,7 +980,7 @@ export class Interior extends Phaser.Scene {
         })
       }
 
-      if (buildingType !== 'storage') {
+      if (buildingType !== 'storage' && buildingType !== 'depot') {
         const storageCount = () => (buildingType === 'workshop' ? plot.craftOutput?.count : plot.output?.count) ?? 0
         const storageCap = () => getStorageCap(plot.level)
         const storageText = this.add.bitmapText(panelX, descY + lineH * 2, 'mainSmall',

@@ -35,6 +35,7 @@ export interface Bandit {
   contents: (ItemStack | null)[] | null
   name: string
   bounty: number
+  interiorKey?: string
 }
 
 export const BANDIT_MAX_HEALTH = 20
@@ -99,10 +100,10 @@ const COVER_HUG_DIST = 14
 // Dodging player bullets. He sidesteps shots whose path is bearing at his body —
 // but only when the player is far enough away. Up close, shots cross the gap too
 // fast to react to, so rushing him denies the dodge entirely.
-const DODGE_MIN_PLAYER_DIST = 250  // player nearer than this → no dodge (rush him)
+const DODGE_MIN_PLAYER_DIST = 350  // player nearer than this → no dodge (rush him)
 const DODGE_TRIGGER_DIST = 130     // bullet must close to within this of him before he reacts (no flinching at the muzzle)
 const DODGE_THREAT_RADIUS = 16     // how near the bullet's path must come to count as aimed
-const DODGE_SPEED = 150        // sidestep speed
+const DODGE_SPEED = 130        // sidestep speed
 const DODGE_COMMIT_MS = 180    // once he commits to a sidestep, he holds it this long
 const DODGE_COOLDOWN_MS = 650  // after a sidestep, he won't dodge again for this long (one decisive step per threat, no stutter)
 const DODGE_CHANCE = 0.85      // fraction of dodgeable threats he actually reacts to
@@ -118,6 +119,8 @@ const MELEE_RETREAT_SPEED = 120 // a deliberate backpedal away from the axe
 export const BANDIT_MUZZLE_DY = -8
 
 export const BANDIT_MANACLE_ICON_DY = -18
+
+export const BODY_LOOT_RANGE = 80
 
 
 const NAME_POOLS = {
@@ -320,7 +323,7 @@ export function getBanditBodyAABB(b: Bandit): { x: number; y: number; w: number;
   return { x: b.x - W / 2, y: b.y - H / 2, w: W, h: H }
 }
 
-export function createBandit(x: number, y: number, name: string, bounty: number): Bandit {
+export function createBandit(x: number, y: number, name: string, bounty: number, interiorKey?: string): Bandit {
   return {
     x, y, vx: 0, vy: 0,
     facingRight: true, facingLockedUntil: 0,
@@ -345,6 +348,7 @@ export function createBandit(x: number, y: number, name: string, bounty: number)
     contents: null,
     name,
     bounty,
+    interiorKey,
   }
 }
 
@@ -608,6 +612,7 @@ export function updateBandits(
   rng: () => number,
   getTetherAnchor: (banditIndex: number) => { x: number; y: number } | null,
   playerSafe: boolean,
+  ignoreRange = false,
 ) {
   const step = dt / 1000
   for (let i = 0; i < bandits.length; i++) {
@@ -718,7 +723,7 @@ export function updateBandits(
     // contact timer. Out of range past GIVE_UP_MS → he stops chasing and walks
     // back to spawn. If the player re-enters range during the walk back, he
     // aborts the return and re-engages. On reaching home he goes fully dormant.
-    if (!playerSafe && dist <= BANDIT_RANGE) {
+    if (!playerSafe && (ignoreRange || dist <= BANDIT_RANGE)) {
       b.lastInRangeAt = gameTime
       b.returningHome = false
     } else if (!b.returningHome && gameTime - b.lastInRangeAt > GIVE_UP_MS) {
@@ -818,7 +823,7 @@ export function updateBandits(
     }
 
     // ---- Out of range: close the distance toward the player ----
-    const inRange = dist <= BANDIT_RANGE
+    const inRange = ignoreRange || dist <= BANDIT_RANGE
     if (!inRange) {
       updateFacing(b, gameTime, player.x)
       steerTo(b, player.x, player.y, WALK_SPEED, step, collidesAt)

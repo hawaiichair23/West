@@ -10,6 +10,7 @@
 
 import Phaser from 'phaser'
 import { COLORS } from '../colors'
+import { BANDIT_SPREAD } from '../world/bandit'
 import { state, PLAYER_BASE_SPEED, CHEST_SLOTS, createContainerContents, type WalkableInteriorItemInstance } from '../game/state'
 import { ITEMS, CONTAINER_PHYSICS, DEFAULT_CONTAINER_PHYSICS, type ItemType, type ItemStack } from '../items/types'
 import { UI } from './UI'
@@ -17,8 +18,8 @@ import { makeRng } from '../world/gen'
 import { grabHover } from '../ui/hover'
 import { outlineIcon } from '../ui/iconOutline'
 import { spriteColors } from '../sprites/data'
-import { type WorldContext, type ClickHandlers, TOOL_RANGE, CRATE_RANGE, dispatchClick } from '../game/ItemActionController'
-import { GunController, spawnCrumbs, spawnParticles, tryAxeEnemy, WEAPON_DAMAGE } from '../game/combat'
+import { type WorldContext, type ClickHandlers, TOOL_RANGE, CRATE_RANGE, dispatchClick, resolveAction } from '../game/ItemActionController'
+import { GunController, spawnCrumbs, spawnParticles, tryAxeEnemy } from '../game/combat'
 import { RopeController, CAT_CRATE, CAT_WORLD } from '../world/ropeController'
 
 // ---- config shape ----
@@ -26,10 +27,11 @@ import { RopeController, CAT_CRATE, CAT_WORLD } from '../world/ropeController'
 // Spawn-config item: only used to seed state on the first visit to a given
 // walkable interior. After that, state is the source of truth.
 export interface WalkableInteriorItem {
-  x: number   // 0..1 fraction of floor width
-  y: number   // 0..1 fraction of floor height
+  x: number
+  y: number
   type: ItemType
-  count?: number   // stack size, defaults to 1
+  count?: number
+  rarity?: 'common' | 'rare' | 'pure_quill'
 }
 
 export interface WalkableInteriorConfig {
@@ -54,28 +56,53 @@ export interface WalkableInteriorConfig {
   pews?: boolean
   brickTrim?: boolean
   floorBorder?: boolean
+  props?: {
+    furniture?: { sprite: string; x: number; y: number; scale?: number; solid?: boolean; solidW?: number; solidH?: number }[]
+    npcs?: { sprite: string; x: number; y: number; scale?: number; faceLeft?: boolean; onInteract: () => void }[]
+  }
 }
 
 export interface WalkableInteriorHandle {
   update: (dt: number) => void
   onCleanup: () => void
+  floorBounds: { left: number; top: number; right: number; bottom: number; w: number; h: number }
+  getPlayer: () => { x: number; y: number; vx: number; vy: number }
+  collidesAt: (px: number, py: number) => boolean
+  fireHostile: (bx: number, by: number, dirX: number, dirY: number) => void
+  getPlayerBullets: () => Array<{ x: number; y: number; vx: number; vy: number }>
+  damagePlayer: (amount: number) => boolean
+  gun: GunController
+  solidObstacles: Array<{ minX: number; maxX: number; minY: number; maxY: number }>
+  player: Phaser.GameObjects.Sprite
+  dropItem: (x: number, y: number, type: ItemType, count: number) => void
+  clickInterceptors: Array<(wx: number, wy: number, pointer: Phaser.Input.Pointer) => boolean>
+  spawnCarriedVisual: () => void
+  destroyCarriedVisual: () => void
+  setBulletHitTest: (fn: ((b: { x: number; y: number; vx: number; vy: number; fromBandit?: boolean }) => boolean) | null) => void
+  ePromptScanners: Array<(px: number, py: number) => { x: number; y: number; topOffset: number; distSq: number } | null>
+  eKeyInterceptors: Array<(px: number, py: number) => boolean>
 }
 
 // ---- constants ----
 
 const INTERIOR_SCALE = 2           // player renders 2x overworld scale
 const PLAYER_SCALE = 2 * INTERIOR_SCALE   // overworld is 2, interior is 4
-const ITEM_SCALE_MULT = 1.5
+const ITEM_SCALE_MULT = 1.2
+const CONTAINER_SCALE_MULT = 2
 const PLAYER_HALF = 5 * INTERIOR_SCALE   // collision half-extent, scaled to the 2x interior render
 const PICKUP_RADIUS = 18
 const PICKUP_ATTRACT_RADIUS = 40
 const PICKUP_ATTRACT_EASE = 0.25
-const EXIT_ZONE_H = 22
 const DROP_JUMP_HEIGHT = 14
 const DROP_JUMP_MS = 360
 const DROP_BOB_AMP = 3
 const DROP_BOB_SPEED = 0.004
 const PICKUP_DELAY_MS = 500
+const CARRIED_MANACLE_DY = -32
+const BANDIT_BULLET_DAMAGE = 1
+const IFRAME_MS = 1000
+const HURT_BLINK_DELAY = 100
+const HURT_BLINK_COUNT = 9
 
 function darkenColor(hex: number, factor: number): number {
   const r = (hex >> 16) & 0xff
@@ -109,6 +136,7 @@ function spawnDroppedInteriorSprite(
       sprite.setData('settled', true)
     },
   })
+  outlineIcon(sprite, COLORS.white)
   return sprite
 }
 
@@ -218,7 +246,7 @@ export function buildWalkableInterior(
     }
   }
 
-  const pewObstacles: Array<{ minX: number; maxX: number; minY: number; maxY: number }> = []
+  const solidObstacles: Array<{ minX: number; maxX: number; minY: number; maxY: number }> = []
   if (config.pews && scene.textures.exists('pew')) {
     const pewScale = 3
     const pewSpriteW = 64
@@ -236,8 +264,32 @@ export function buildWalkableInterior(
       const cy = startY + i * spacingY
       const leftPew = scene.add.image(leftCX, cy, 'pew').setScale(pewScale).setDepth(cy).setTint(0xd8d8d8)
       const rightPew = scene.add.image(rightCX, cy, 'pew').setScale(pewScale).setDepth(cy).setTint(0xd8d8d8)
-      pewObstacles.push({ minX: leftPew.x - pewW / 2, maxX: leftPew.x + pewW / 2, minY: leftPew.y - pewH / 2, maxY: leftPew.y + pewH / 2 })
-      pewObstacles.push({ minX: rightPew.x - pewW / 2, maxX: rightPew.x + pewW / 2, minY: rightPew.y - pewH / 2, maxY: rightPew.y + pewH / 2 })
+      solidObstacles.push({ minX: leftPew.x - pewW / 2, maxX: leftPew.x + pewW / 2, minY: leftPew.y - pewH / 2, maxY: leftPew.y + pewH / 2 })
+      solidObstacles.push({ minX: rightPew.x - pewW / 2, maxX: rightPew.x + pewW / 2, minY: rightPew.y - pewH / 2, maxY: rightPew.y + pewH / 2 })
+    }
+  }
+
+  const npcSprites: Array<{ sprite: Phaser.GameObjects.Sprite; onInteract: () => void }> = []
+  if (config.props?.furniture) {
+    for (const f of config.props.furniture) {
+      const wx = floorLeft + f.x * floorW
+      const wy = floorTop + f.y * floorH
+      const spr = scene.add.sprite(wx, wy, f.sprite).setScale(f.scale ?? 3).setDepth(wy)
+      if (f.solid) {
+        const hw = (f.solidW ?? spr.displayWidth) / 2
+        const hh = (f.solidH ?? spr.displayHeight) / 2
+        solidObstacles.push({ minX: spr.x - hw, maxX: spr.x + hw, minY: spr.y - hh, maxY: spr.y + hh })
+      }
+    }
+  }
+  if (config.props?.npcs) {
+    for (const n of config.props.npcs) {
+      const wx = floorLeft + n.x * floorW
+      const wy = floorTop + n.y * floorH
+      const spr = scene.add.sprite(wx, wy, n.sprite).setScale(n.scale ?? PLAYER_SCALE).setDepth(wy)
+      if (n.faceLeft) spr.setFlipX(true)
+      outlineIcon(spr, COLORS.black)
+      npcSprites.push({ sprite: spr, onInteract: n.onInteract })
     }
   }
 
@@ -367,7 +419,7 @@ export function buildWalkableInterior(
     if (rng() < chance && config.crateContents !== undefined) {
       const contents: (ItemStack | null)[] = Array.from({ length: CHEST_SLOTS }, () => null)
       config.crateContents.forEach((it, i) => {
-        if (i < CHEST_SLOTS) contents[i] = { type: it.type, count: it.count ?? 1 }
+        if (i < CHEST_SLOTS) contents[i] = { type: it.type, count: it.count ?? 1, rarity: it.rarity }
       })
       const pos = config.cratePos ?? { x: 0.5, y: 0.5 }
       const cx = Math.round(floorLeft + floorW * pos.x)
@@ -388,11 +440,11 @@ export function buildWalkableInterior(
     const c = state.placedCrates[idx]
     const def = ITEMS[c.item as keyof typeof ITEMS]
     const sprite = scene.add.sprite(c.x, c.y, def.sprite)
-      .setScale(def.scale * ITEM_SCALE_MULT)
+      .setScale(def.scale * CONTAINER_SCALE_MULT)
       .setDepth(c.y)
       .setInteractive()
     const phys = CONTAINER_PHYSICS[c.item] ?? DEFAULT_CONTAINER_PHYSICS
-    const interiorMassScale = INTERIOR_SCALE * ITEM_SCALE_MULT
+    const interiorMassScale = INTERIOR_SCALE * CONTAINER_SCALE_MULT
     const body = scene.matter.add.rectangle(c.x, c.y, sprite.displayWidth, sprite.displayHeight, { frictionAir: phys.frictionAir, mass: phys.mass * interiorMassScale, collisionFilter: { category: CAT_CRATE, mask: CAT_WORLD | CAT_CRATE } })
     scene.matter.body.setInertia(body, Infinity)
     interiorCrateIndices.push(idx)
@@ -404,7 +456,7 @@ export function buildWalkableInterior(
     if (state.placedCrates[i].interior === config.stateKey) spawnInteriorCrate(i)
   }
 
-  const spawnInset = EXIT_ZONE_H + PLAYER_HALF + 4
+  const spawnInset = doorHalfLen + PLAYER_HALF + 4
   const floorCX = floorLeft + floorW / 2
   const floorCY = floorTop + floorH / 2
   const playerStartX = doorSide === 'left' ? floorLeft + spawnInset
@@ -417,13 +469,33 @@ export function buildWalkableInterior(
     .setScale(PLAYER_SCALE)
     .setDepth(900)
   outlineIcon(player, COLORS.black)
+
+  let playerVX = 0
+  let playerVY = 0
+  let invulnerableUntil = 0
+
+  let carriedBanditSprite: Phaser.GameObjects.Sprite | null = null
+  let carriedManacleSprite: Phaser.GameObjects.Sprite | null = null
+  const clickInterceptors: Array<(wx: number, wy: number, pointer: Phaser.Input.Pointer) => boolean> = []
+  let bulletHitTest: ((b: { x: number; y: number; vx: number; vy: number; fromBandit?: boolean }) => boolean) | null = null
+  const ePromptScanners: Array<(px: number, py: number) => { x: number; y: number; topOffset: number; distSq: number } | null> = []
+  const eKeyInterceptors: Array<(px: number, py: number) => boolean> = []
+  if (state.carriedBandit) {
+    carriedBanditSprite = scene.add.sprite(player.x, player.y - 16, 'player').setScale(PLAYER_SCALE).setDepth(901)
+    outlineIcon(carriedBanditSprite, COLORS.black)
+    carriedManacleSprite = outlineIcon(
+      scene.add.sprite(player.x, player.y - 16 + CARRIED_MANACLE_DY, 'item_manacles').setScale(2).setDepth(902),
+      COLORS.worldBg,
+    )
+  }
   scene.cameras.main.startFollow(player, true, 0.15, 0.15)
 
-  const floor = scene.add.rectangle(floorLeft + floorW / 2, floorTop + floorH / 2, floorW, floorH, 0x000000, 0)
+  const floor = scene.add.rectangle(floorLeft + floorW / 2, floorTop + floorH / 2, floorW * 3, floorH * 3, 0x000000, 0)
     .setInteractive()
     .setDepth(-10)
 
   const gun = new GunController(state.worldSeed + 1234, 9, 4)
+  gun.setBulletOutline(0xFFFFFF)
   const rope = new RopeController(scene, player, 0x5C3A1A)
   rope.onRopeConsumed = () => {
     for (let i = 0; i < state.inventory.length; i++) {
@@ -503,60 +575,50 @@ export function buildWalkableInterior(
     return interiorCrateBodies[localIdx] ?? null
   }
 
-  const destroyInteriorCrate = (clickX: number, clickY: number): boolean => {
-    const dx = clickX - player.x
-    const dy = clickY - player.y
-    if (dx * dx + dy * dy > TOOL_RANGE * TOOL_RANGE) return false
-    const hitSq = 26 * 26
-    for (let i = 0; i < interiorCrateIndices.length; i++) {
-      const body = interiorCrateBodies[i]
-      const sprite = interiorCrateSprites[i]
-      if (!body || !sprite) continue
-      const cdx = clickX - body.position.x
-      const cdy = clickY - body.position.y
-      if (cdx * cdx + cdy * cdy > hitSq) continue
+  const destroyInteriorCrate = (stateIdx: number): boolean => {
+    const i = interiorCrateIndices.indexOf(stateIdx)
+    if (i < 0) return false
+    const body = interiorCrateBodies[i]
+    const sprite = interiorCrateSprites[i]
+    if (!body || !sprite) return false
 
-      const bx = body.position.x
-      const by = body.position.y
-      const stateIdx = interiorCrateIndices[i]
-      const crate = state.placedCrates[stateIdx]
-      const crateItem = crate.item
+    const bx = body.position.x
+    const by = body.position.y
+    const crate = state.placedCrates[stateIdx]
+    const crateItem = crate.item
 
-      spawnParticles(scene, bx, by, spriteColors(ITEMS[crateItem as keyof typeof ITEMS].sprite))
+    spawnParticles(scene, bx, by, spriteColors(ITEMS[crateItem as keyof typeof ITEMS].sprite))
 
-      const isLockbox = crateItem === 'silver_lockbox' || crateItem === 'gold_lockbox'
-      if (isLockbox) {
-        liveItems.push({ x: (bx - floorLeft) / floorW, y: (by - floorTop) / floorH, type: crateItem, count: 1 })
-        floorSprites.push(spawnDroppedInteriorSprite(scene, bx, by, crateItem, ITEM_SCALE_MULT))
-      } else {
-        liveItems.push({ x: (bx - floorLeft) / floorW, y: (by - floorTop) / floorH, type: crateItem, count: 1 })
-        floorSprites.push(spawnDroppedInteriorSprite(scene, bx, by, crateItem, ITEM_SCALE_MULT))
-        const spillRng = makeRng(Math.floor(bx * 1000 + by))
-        for (const stack of crate.contents) {
-          if (!stack) continue
-          const landX = bx + (spillRng() - 0.5) * 48
-          const landY = by + (spillRng() - 0.5) * 48
-          liveItems.push({ x: (landX - floorLeft) / floorW, y: (landY - floorTop) / floorH, type: stack.type, count: stack.count })
-          floorSprites.push(spawnDroppedInteriorSprite(scene, landX, landY, stack.type, ITEM_SCALE_MULT))
-        }
+    const isLockbox = crateItem === 'silver_lockbox' || crateItem === 'gold_lockbox'
+    if (isLockbox) {
+      liveItems.push({ x: (bx - floorLeft) / floorW, y: (by - floorTop) / floorH, type: crateItem, count: 1 })
+      floorSprites.push(spawnDroppedInteriorSprite(scene, bx, by, crateItem, ITEM_SCALE_MULT))
+    } else {
+      liveItems.push({ x: (bx - floorLeft) / floorW, y: (by - floorTop) / floorH, type: crateItem, count: 1 })
+      floorSprites.push(spawnDroppedInteriorSprite(scene, bx, by, crateItem, ITEM_SCALE_MULT))
+      const spillRng = makeRng(Math.floor(bx * 1000 + by))
+      for (const stack of crate.contents) {
+        if (!stack) continue
+        const landX = bx + (spillRng() - 0.5) * 48
+        const landY = by + (spillRng() - 0.5) * 48
+        liveItems.push({ x: (landX - floorLeft) / floorW, y: (landY - floorTop) / floorH, type: stack.type, count: stack.count })
+        floorSprites.push(spawnDroppedInteriorSprite(scene, landX, landY, stack.type, ITEM_SCALE_MULT))
       }
-
-      sprite.destroy()
-      interiorCrateSprites[i] = null
-      if (body) scene.matter.world.remove(body)
-      interiorCrateBodies[i] = null
-      state.placedCrates.splice(stateIdx, 1)
-      interiorCrateIndices.splice(i, 1)
-      interiorCrateSprites.splice(i, 1)
-      interiorCrateBodies.splice(i, 1)
-      // Fix up remaining indices after the splice
-      for (let j = 0; j < interiorCrateIndices.length; j++) {
-        if (interiorCrateIndices[j] > stateIdx) interiorCrateIndices[j]--
-      }
-      if (ePrompt) ePrompt.setVisible(false)
-      return true
     }
-    return false
+
+    sprite.destroy()
+    interiorCrateSprites[i] = null
+    if (body) scene.matter.world.remove(body)
+    interiorCrateBodies[i] = null
+    state.placedCrates.splice(stateIdx, 1)
+    interiorCrateIndices.splice(i, 1)
+    interiorCrateSprites.splice(i, 1)
+    interiorCrateBodies.splice(i, 1)
+    for (let j = 0; j < interiorCrateIndices.length; j++) {
+      if (interiorCrateIndices[j] > stateIdx) interiorCrateIndices[j]--
+    }
+    if (ePrompt) ePrompt.setVisible(false)
+    return true
   }
 
   const interiorHandlers: ClickHandlers = {
@@ -565,7 +627,7 @@ export function buildWalkableInterior(
     eatFromSlot: () => !!state.eatFromSlot(state.selectedInventorySlot, scene.registry),
     spawnCrumbs: (x, y, color) => spawnCrumbs(scene, x, y, color),
     fireBullet: (tx, ty) => gun.fire(scene, player.x, player.y, tx, ty),
-    tryDestroyCrate: (wx, wy) => destroyInteriorCrate(wx, wy),
+    tryDestroyCrate: (targetIndex) => destroyInteriorCrate(targetIndex),
     tryDestroyPost: () => false,
     tryDestroyGate: () => false,
     tryDestroyPlot: () => false,
@@ -577,7 +639,8 @@ export function buildWalkableInterior(
     tryToggleGate: () => false,
 
     tryAxeEnemy: (wx, wy) => {
-      const dmg = WEAPON_DAMAGE['axe'] ?? 3
+      const tool = state.getSelectedTool()
+      const dmg = tool?.combat != null ? 3 : 0
       const result = tryAxeEnemy(player.x, player.y, wx, wy, dmg, lastChopAt)
       lastChopAt = result.newChopAt
       return result.hit
@@ -605,23 +668,11 @@ export function buildWalkableInterior(
       scene.registry.events.emit('inventory-changed')
       return true
     },
-    tryOpenCrate: (wx, wy) => {
+    tryOpenCrate: (targetIndex) => {
       const ui = scene.scene.get('UI') as UI
       if (ui.isCrateOpen()) return false
-      const hitSq = 26 * 26
-      for (let i = 0; i < interiorCrateIndices.length; i++) {
-        const body = interiorCrateBodies[i]
-        if (!body) continue
-        const cdx = wx - body.position.x
-        const cdy = wy - body.position.y
-        if (cdx * cdx + cdy * cdy > hitSq) continue
-        const pdx = player.x - body.position.x
-        const pdy = player.y - body.position.y
-        if (pdx * pdx + pdy * pdy > CRATE_RANGE * CRATE_RANGE) continue
-        scene.registry.events.emit('open-crate', interiorCrateIndices[i])
-        return true
-      }
-      return false
+      scene.registry.events.emit('open-crate', targetIndex)
+      return true
     },
     throwRope: (tx, ty) => {
       const sel = state.inventory[state.selectedInventorySlot]
@@ -644,8 +695,10 @@ export function buildWalkableInterior(
       if (ui.isPointerOverInventory(p.x, p.y)) return
       const stack = drag.takeHeld()
       if (stack) {
-        const dropX = p.x
-        const dropY = p.y
+        const wp = scene.cameras.main.getWorldPoint(p.x, p.y)
+        const dropX = wp.x
+        const dropY = wp.y
+        console.log(`[interior drop] ${stack.type} @ ${Math.round(dropX)}, ${Math.round(dropY)} (norm ${((dropX - floorLeft) / floorW).toFixed(3)}, ${((dropY - floorTop) / floorH).toFixed(3)})`)
         liveItems.push({ x: (dropX - floorLeft) / floorW, y: (dropY - floorTop) / floorH, type: stack.type, count: stack.count })
         floorSprites.push(spawnDroppedInteriorSprite(scene, dropX, dropY, stack.type, ITEM_SCALE_MULT))
       }
@@ -666,7 +719,12 @@ export function buildWalkableInterior(
       return
     }
 
-    dispatchClick(walkableCtx, interiorHandlers, p.x, p.y)
+    const wp = scene.cameras.main.getWorldPoint(p.x, p.y)
+    for (const intercept of clickInterceptors) {
+      if (intercept(wp.x, wp.y, p)) return
+    }
+    const action = resolveAction(walkableCtx, wp.x, wp.y, false)
+    dispatchClick(walkableCtx, interiorHandlers, action, wp.x, wp.y)
   })
 
   // ---- input ----
@@ -686,6 +744,7 @@ export function buildWalkableInterior(
     const sprite = scene.add.sprite(ix, iy, def.sprite)
       .setScale(def.scale * ITEM_SCALE_MULT)
       .setDepth(800)
+    outlineIcon(sprite, COLORS.white)
     sprite.setData('baseY', iy)
     sprite.setData('bobPhase', iy * 0.7)
     sprite.setData('pickupAt', 0)
@@ -698,20 +757,10 @@ export function buildWalkableInterior(
   const attachCrateHandlers = (sprite: Phaser.GameObjects.Sprite) => {
     sprite.on('pointerdown', (p: Phaser.Input.Pointer) => {
       if (!p.leftButtonDown()) return
-      const heldType = state.inventory[state.selectedInventorySlot]?.type
-      const isDestroy = heldType === 'axe' || heldType === 'pickaxe'
-      const range = isDestroy ? TOOL_RANGE : CRATE_RANGE
-      const ddx = p.x - player.x
-      const ddy = p.y - player.y
-      if (ddx * ddx + ddy * ddy > range * range) return
-      if (isDestroy) {
-        interiorHandlers.setAxeSwung(true)
-        destroyInteriorCrate(p.x, p.y)
-        return
-      }
-      const tool = state.getSelectedTool()
-      if (tool) return
-      interiorHandlers.tryOpenCrate(p.x, p.y)
+      const wp = scene.cameras.main.getWorldPoint(p.x, p.y)
+      const action = resolveAction(walkableCtx, wp.x, wp.y, false)
+      if (!action) return
+      dispatchClick(walkableCtx, interiorHandlers, action, wp.x, wp.y)
     })
     sprite.on('pointerover', () => { crateHovered = true })
     sprite.on('pointerout', () => { crateHovered = false; grabHover.active = false })
@@ -727,6 +776,73 @@ export function buildWalkableInterior(
     const main = scene.add.bitmapText(0, 0, 'main', 'E', E_SIZE).setOrigin(0.5, 1)
       .setTint(COLORS.uiText)
     ePrompt = scene.add.container(0, 0, [shadow, main]).setDepth(100000).setVisible(false)
+  }
+
+  const interiorDamagePlayer = (amount: number): boolean => {
+    if (state.gameTime < invulnerableUntil) return false
+    state.changeHealth(-amount, scene.registry)
+    invulnerableUntil = state.gameTime + IFRAME_MS
+    player.setTexture('player_hurt')
+    player.setVisible(false)
+    const event = scene.time.addEvent({
+      delay: HURT_BLINK_DELAY,
+      repeat: HURT_BLINK_COUNT,
+      callback: () => {
+        if (event.repeatCount === 0) {
+          player.setVisible(true)
+          player.setTexture('player')
+        } else {
+          player.setVisible(!player.visible)
+        }
+      },
+    })
+    return true
+  }
+
+  const interiorCollidesAt = (px: number, py: number): boolean => {
+    if (px < floorLeft || px > floorRight || py < floorTop || py > floorBottom) return true
+    for (const o of solidObstacles) {
+      if (px >= o.minX && px <= o.maxX && py >= o.minY && py <= o.maxY) return true
+    }
+    for (let ci = 0; ci < interiorCrateBodies.length; ci++) {
+      const cb = interiorCrateBodies[ci]
+      const cs = interiorCrateSprites[ci]
+      if (!cb || !cs) continue
+      const hw = cs.displayWidth / 2
+      const hh = cs.displayHeight / 2
+      if (px >= cb.position.x - hw && px <= cb.position.x + hw && py >= cb.position.y - hh && py <= cb.position.y + hh) return true
+    }
+    return false
+  }
+
+  const interiorFireHostile = (bx: number, by: number, dirX: number, dirY: number): void => {
+    const angle = Math.atan2(dirY, dirX) + (gun.nextSpread() - 0.5) * BANDIT_SPREAD
+    gun.spawnHostile(scene, bx, by, angle)
+  }
+
+  const interiorGetPlayerBullets = (): Array<{ x: number; y: number; vx: number; vy: number }> => {
+    return gun.bullets.filter(b => !b.fromBandit).map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy }))
+  }
+
+  const interiorDropItem = (x: number, y: number, type: ItemType, count: number): void => {
+    liveItems.push({ x: (x - floorLeft) / floorW, y: (y - floorTop) / floorH, type, count })
+    floorSprites.push(spawnDroppedInteriorSprite(scene, x, y, type, ITEM_SCALE_MULT))
+  }
+
+  const spawnCarriedVisual = (): void => {
+    if (carriedBanditSprite) carriedBanditSprite.destroy()
+    if (carriedManacleSprite) carriedManacleSprite.destroy()
+    carriedBanditSprite = scene.add.sprite(player.x, player.y - 16, 'player').setScale(PLAYER_SCALE).setDepth(901)
+    outlineIcon(carriedBanditSprite, COLORS.black)
+    carriedManacleSprite = outlineIcon(
+      scene.add.sprite(player.x, player.y - 16 + CARRIED_MANACLE_DY, 'item_manacles').setScale(2).setDepth(902),
+      COLORS.worldBg,
+    )
+  }
+
+  const destroyCarriedVisual = (): void => {
+    if (carriedBanditSprite) { carriedBanditSprite.destroy(); carriedBanditSprite = null }
+    if (carriedManacleSprite) { carriedManacleSprite.destroy(); carriedManacleSprite = null }
   }
 
   // ---- update loop ----
@@ -764,7 +880,7 @@ export function buildWalkableInterior(
         if (px + PLAYER_HALF > bx - hw && px - PLAYER_HALF < bx + hw
           && py + PLAYER_HALF > by - hh && py - PLAYER_HALF < by + hh) return true
       }
-      for (const o of pewObstacles) {
+      for (const o of solidObstacles) {
         if (px + PLAYER_HALF > o.minX && px - PLAYER_HALF < o.maxX
           && py + PLAYER_HALF > o.minY && py - PLAYER_HALF < o.maxY) return true
       }
@@ -798,16 +914,31 @@ export function buildWalkableInterior(
       }
     }
 
+    const oldPX = player.x
+    const oldPY = player.y
     const tryX = Phaser.Math.Clamp(player.x + dx * step, minX, maxX)
     if (!crateBlocks(tryX, player.y)) player.x = tryX
     const tryY = Phaser.Math.Clamp(player.y + dy * step, minY, maxY)
     if (!crateBlocks(player.x, tryY)) player.y = tryY
+    playerVX = (player.x - oldPX) / (dt / 1000 || 1)
+    playerVY = (player.y - oldPY) / (dt / 1000 || 1)
+
+    if (carriedBanditSprite) {
+      carriedBanditSprite.x = player.x
+      carriedBanditSprite.y = player.y - 16
+    }
+    if (carriedManacleSprite) {
+      carriedManacleSprite.x = player.x
+      carriedManacleSprite.y = player.y - 16 + CARRIED_MANACLE_DY
+    }
 
     // ---- E prompt above crate when player is in range ----
     if (ePrompt) {
-      let nearestBody: MatterJS.BodyType | null = null
-      let nearestHH = 0
+      let nearestX = 0
+      let nearestY = 0
+      let nearestTopOffset = 0
       let nearestDistSq = 80 * 80
+      let found = false
       for (let ci = 0; ci < interiorCrateBodies.length; ci++) {
         const cb = interiorCrateBodies[ci]
         const cs = interiorCrateSprites[ci]
@@ -815,11 +946,40 @@ export function buildWalkableInterior(
         const ddx = player.x - cb.position.x
         const ddy = player.y - cb.position.y
         const dSq = ddx * ddx + ddy * ddy
-        if (dSq <= nearestDistSq) { nearestBody = cb; nearestHH = cs.displayHeight / 2; nearestDistSq = dSq }
+        if (dSq <= nearestDistSq) {
+          nearestX = cb.position.x
+          nearestY = cb.position.y
+          nearestTopOffset = cs.displayHeight / 2
+          nearestDistSq = dSq
+          found = true
+        }
+      }
+      for (let ni = 0; ni < npcSprites.length; ni++) {
+        const ns = npcSprites[ni].sprite
+        const ddx = player.x - ns.x
+        const ddy = player.y - ns.y
+        const dSq = ddx * ddx + ddy * ddy
+        if (dSq <= nearestDistSq) {
+          nearestX = ns.x
+          nearestY = ns.y
+          nearestTopOffset = ns.displayHeight / 2
+          nearestDistSq = dSq
+          found = true
+        }
+      }
+      for (const scanner of ePromptScanners) {
+        const result = scanner(player.x, player.y)
+        if (result && result.distSq <= nearestDistSq) {
+          nearestX = result.x
+          nearestY = result.y
+          nearestTopOffset = result.topOffset
+          nearestDistSq = result.distSq
+          found = true
+        }
       }
       const ui = scene.scene.get('UI') as UI
-      if (nearestBody && !ui.isCrateOpen()) {
-        ePrompt.setPosition(nearestBody.position.x, nearestBody.position.y - nearestHH - 8).setVisible(true)
+      if (found && !ui.isCrateOpen()) {
+        ePrompt.setPosition(nearestX, nearestY - nearestTopOffset - 8).setVisible(true)
       } else {
         ePrompt.setVisible(false)
       }
@@ -829,6 +989,17 @@ export function buildWalkableInterior(
 
     rope.update()
     gun.tick(dt, { left: floorLeft, right: floorRight, top: floorTop, bottom: floorBottom }, rKey, scene.registry, (b) => {
+      const hitSq = 24 * 24
+      if (b.fromBandit) {
+        const pdx = b.x - player.x
+        const pdy = b.y - player.y
+        if (pdx * pdx + pdy * pdy <= hitSq) {
+          interiorDamagePlayer(BANDIT_BULLET_DAMAGE)
+          return true
+        }
+      } else {
+        if (bulletHitTest && bulletHitTest(b)) return true
+      }
       for (let ci = 0; ci < interiorCrateBodies.length; ci++) {
         const cb = interiorCrateBodies[ci]
         const cs = interiorCrateSprites[ci]
@@ -914,7 +1085,9 @@ export function buildWalkableInterior(
 
     if (Phaser.Input.Keyboard.JustDown(eKey)) {
       const ui = scene.scene.get('UI') as UI
-      if (ui.isCrateOpen()) {
+      if (ui.dialogueInputConsumed()) {
+      } else if (ui.isDialogueOpen()) {
+      } else if (ui.isCrateOpen()) {
         ui.closeCrate()
       } else if (ui.isUpperInventoryOpen()) {
         scene.registry.events.emit('toggle-inventory')
@@ -932,7 +1105,24 @@ export function buildWalkableInterior(
         if (nearestIdx >= 0) {
           scene.registry.events.emit('open-crate', interiorCrateIndices[nearestIdx])
         } else {
-          scene.registry.events.emit('toggle-inventory')
+          let nearestNpc = -1
+          let nearestNpcDistSq = 80 * 80
+          for (let ni = 0; ni < npcSprites.length; ni++) {
+            const ns = npcSprites[ni].sprite
+            const ddx = player.x - ns.x
+            const ddy = player.y - ns.y
+            const dSq = ddx * ddx + ddy * ddy
+            if (dSq <= nearestNpcDistSq) { nearestNpc = ni; nearestNpcDistSq = dSq }
+          }
+          if (nearestNpc >= 0) {
+            npcSprites[nearestNpc].onInteract()
+          } else {
+            let handled = false
+            for (const intercept of eKeyInterceptors) {
+              if (intercept(player.x, player.y)) { handled = true; break }
+            }
+            if (!handled) scene.registry.events.emit('toggle-inventory')
+          }
         }
       }
     }
@@ -940,12 +1130,20 @@ export function buildWalkableInterior(
     {
       const ui = scene.scene.get('UI') as UI
       if (ui.isCrateOpen()) {
+        const bodyPos = ui.openCratePos()
         let tooFar = true
-        for (const cb of interiorCrateBodies) {
-          if (!cb) continue
-          const ddx = player.x - cb.position.x
-          const ddy = player.y - cb.position.y
-          if (ddx * ddx + ddy * ddy <= 80 * 80) { tooFar = false; break }
+        if (bodyPos) {
+          const ddx = player.x - bodyPos.x
+          const ddy = player.y - bodyPos.y
+          if (ddx * ddx + ddy * ddy <= 80 * 80) tooFar = false
+        }
+        if (tooFar) {
+          for (const cb of interiorCrateBodies) {
+            if (!cb) continue
+            const ddx = player.x - cb.position.x
+            const ddy = player.y - cb.position.y
+            if (ddx * ddx + ddy * ddy <= 80 * 80) { tooFar = false; break }
+          }
         }
         if (tooFar) ui.closeCrate()
       }
@@ -973,10 +1171,7 @@ export function buildWalkableInterior(
       s.y = baseY + Math.sin(bobNow * DROP_BOB_SPEED + phase) * DROP_BOB_AMP
     }
 
-    const exiting = doorSide === 'bottom' ? (player.y >= floorBottom - EXIT_ZONE_H && Math.abs(player.x - doorCX) <= doorHalfW)
-      : doorSide === 'top' ? (player.y <= floorTop + EXIT_ZONE_H && Math.abs(player.x - doorCX) <= doorHalfW)
-      : doorSide === 'left' ? (player.x <= floorLeft + EXIT_ZONE_H && Math.abs(player.y - doorCY) <= doorHalfW)
-      : (player.x >= floorRight - EXIT_ZONE_H && Math.abs(player.y - doorCY) <= doorHalfW)
+    const exiting = Math.abs(player.x - doorCX) <= doorHalfW && Math.abs(player.y - doorCY) <= doorHalfLen
     if (exiting) {
       exitFn()
     }
@@ -994,6 +1189,8 @@ export function buildWalkableInterior(
       scene.cameras.main.scrollY = 0
     }
     player.destroy()
+    if (carriedBanditSprite) carriedBanditSprite.destroy()
+    if (carriedManacleSprite) carriedManacleSprite.destroy()
     floor.destroy()
     gun.destroyAll()
     if (scene.matter && scene.matter.world) rope.clearAll()
@@ -1008,5 +1205,24 @@ export function buildWalkableInterior(
     for (const s of floorSprites) { if (s) s.destroy() }
   }
 
-  return { update, onCleanup }
+  return {
+    update,
+    onCleanup,
+    floorBounds: { left: floorLeft, top: floorTop, right: floorRight, bottom: floorBottom, w: floorW, h: floorH },
+    getPlayer: () => ({ x: player.x, y: player.y, vx: playerVX, vy: playerVY }),
+    collidesAt: interiorCollidesAt,
+    fireHostile: interiorFireHostile,
+    getPlayerBullets: interiorGetPlayerBullets,
+    damagePlayer: interiorDamagePlayer,
+    gun,
+    solidObstacles,
+    player,
+    dropItem: interiorDropItem,
+    clickInterceptors,
+    spawnCarriedVisual,
+    destroyCarriedVisual,
+    setBulletHitTest: (fn) => { bulletHitTest = fn },
+    ePromptScanners,
+    eKeyInterceptors,
+  }
 }

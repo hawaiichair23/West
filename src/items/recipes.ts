@@ -202,9 +202,6 @@ export function consumeCraft(plotIndex: number): ItemStack | null {
 
   const output = { type: match.recipe.output, count: match.recipe.outputCount ?? 1 }
 
-  // dialogue flag — the workshop NPC reacts the first time bread is made
-  if (output.type === 'bread') state.hasMadeBread = true
-  // unlock flag — first rope craft adds rope to the Tool Shop's listings
   if (output.type === 'rope') state.hasCraftedRope = true
   if (output.type === 'post') state.hasCraftedPost = true
   if (output.type === 'bag') state.hasCraftedBag = true

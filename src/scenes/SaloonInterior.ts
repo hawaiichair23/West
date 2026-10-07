@@ -9,6 +9,13 @@ export function buildSaloonInterior(scene: Phaser.Scene): SaloonInteriorHandle {
     {
       kind: 'item',
       entry: {
+        type: 'whiskey',
+        buyPrice: 100,
+      },
+    },
+    {
+      kind: 'item',
+      entry: {
         type: 'widower',
         buyPrice: 5000,
         isOwned: () => bought,

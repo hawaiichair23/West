@@ -20,6 +20,8 @@ export interface ItemDef {
   // When true, consuming restores the player to full health regardless of max.
   healFull?: boolean
   maxHeartsBonus?: number
+  tempHeartsBonus?: number
+  tempHeartsDurationMs?: number
   // Sell price at the general store in gold per item. 0 (or undefined) = not sellable.
   sellPrice?: number
   // Bag grid dimensions. Defined for bag-family items only.
@@ -70,10 +72,12 @@ const ITEMS_RAW = {
   rock_small: { name: 'Small Rock', sprite: 'rock_small', maxStack: 64, scale: 2, sellPrice: 2, activeTool: true, cursorContexts: ['overworld'] },
   bread:   { name: 'Bread',   sprite: 'item_bread',   maxStack: 64, scale: 2, edible: true, crumbColor: 0xD4A574, healHearts: 0.5, sellPrice: 7, desc: 'A baked food product.' },
   snake_oil: { name: 'Snake Oil', sprite: 'item_snake_oil', maxStack: 64, scale: 2, edible: true, crumbColor: 0xCAA24A, healFull: true, sellPrice: 15, desc: 'Patent medicine.' },
-  widower: { name: 'Widower', sprite: 'item_widower', maxStack: 64, scale: 2, edible: true, crumbColor: 0x241712, maxHeartsBonus: 1, desc: 'Permanently increases constitution.' },
+  widower: { name: 'Widower', sprite: 'item_widower', maxStack: 64, scale: 2, edible: true, crumbColor: 0x241712, maxHeartsBonus: 1, desc: 'Chartreuse, benedictine, and absinthe in a molasses glass.' },
+  whiskey: { name: 'Whiskey', sprite: 'item_whiskey', maxStack: 64, scale: 2, edible: true, crumbColor: 0x8a5a32, sellPrice: 50, tempHeartsBonus: 1, tempHeartsDurationMs: 60000, desc: 'A bottle of amber Kentucky bourbon.' },
+  tobacco: { name: 'Tobacco', sprite: 'item_tobacco', maxStack: 64, scale: 2, sellPrice: 8, desc: 'Cured leaf. Some men will trade for it.' },
   shovel:  { name: 'Shovel',  sprite: 'item_shovel',  maxStack: 1,  scale: 3, sellPrice: 40, activeTool: true, cursorContexts: ['overworld', 'field'], digging: 1, digSprite: 'shovel_dig', desc: 'For digging and burying.' },
   tempered_shovel: { name: 'Tempered Steel Shovel', sprite: 'item_tempered_shovel', maxStack: 1, scale: 3, sellPrice: 160, activeTool: true, cursorContexts: ['overworld', 'field'], digging: 2, digSprite: 'shovel_dig_tempered', desc: 'Heat-treated steel shovel.' },
-  axe:     { name: 'Axe',     sprite: 'item_axe',     maxStack: 1,  scale: 3, sellPrice: 200, activeTool: true, cursorContexts: ['overworld'], chopping: 1, desc: 'For felling trees into wood.' },
+  axe:     { name: 'Axe',     sprite: 'item_axe',     maxStack: 1,  scale: 3, sellPrice: 200, activeTool: true, cursorContexts: ['overworld'], chopping: 1, combat: 1, desc: 'For felling trees into wood.' },
   bag:     { name: 'Bag',     sprite: 'item_bag',     maxStack: 1,  scale: 2, bagCols: 2, bagRows: 2, sellPrice: 100, desc: 'Extra storage.' },
   medium_bag: { name: 'War Bag', sprite: 'item_medium_bag', maxStack: 1,  scale: 2, bagCols: 3, bagRows: 2, sellPrice: 100, desc: 'Extra storage.' },
   sack:    { name: 'Sack',    sprite: 'item_sack',    maxStack: 1,  scale: 2, bagCols: 4, bagRows: 2, sellPrice: 120, desc: 'A lot of storage.' },

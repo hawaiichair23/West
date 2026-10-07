@@ -53,6 +53,7 @@ export const INTERIOR_PALETTES = {
   nursery:        { floorColor: 0x8E8550, wallColor: 0x3A3220 },
   abandonedHouse: { floorColor: ABANDONED_HOUSE_FLOOR_COLOR, wallColor: ABANDONED_HOUSE_WALL_COLOR },
   longHouse:      { floorColor: 0x5A5A5A, wallColor: 0x2A2A2A },
+  barracks:       { floorColor: 0x7A5A3A, wallColor: 0xB8894A },
   generalStore:   { floorColor: 0x6E7A4A, wallColor: 0x2A2E1A },
   church:         { floorColor: 0x2A2A2E, wallColor: 0x0E0E12, skyColor: 0xFF707F },
   mill:           { floorColor: 0x9A7B5A, wallColor: 0x3A2818 },

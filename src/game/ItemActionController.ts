@@ -37,12 +37,12 @@ export type ActionKind =
 export type ItemAction =
   | { kind: 'untie-rope' }
   | { kind: 'place-deed'; sprite: string; scale: number }
-  | { kind: 'destroy-post' }
-  | { kind: 'destroy-crate' }
-  | { kind: 'destroy-plot' }
-  | { kind: 'destroy-pipe' }
+  | { kind: 'destroy-post'; targetIndex: number }
+  | { kind: 'destroy-crate'; targetIndex: number }
+  | { kind: 'destroy-plot'; targetIndex: number }
+  | { kind: 'destroy-pipe'; targetIndex: number }
   | { kind: 'destroy-wood' }
-  | { kind: 'destroy-gate' }
+  | { kind: 'destroy-gate'; targetIndex: number }
   | { kind: 'chop-tree'; sprite: string; scale: number }
   | { kind: 'mine-rock'; sprite: string; scale: number }
   | { kind: 'dig'; sprite: string; scale: number }
@@ -57,11 +57,11 @@ export type ItemAction =
   | { kind: 'quirt'; sprite: string; scale: number; gear: number }
   | { kind: 'aim'; sprite: string; scale: number; bullets?: string }
   | { kind: 'eat-food'; sprite: string; scale: number }
-  | { kind: 'mount'; sprite: string; scale: number; tint: number | null }
-  | { kind: 'dismount'; sprite: string; scale: number; tint: number | null }
-  | { kind: 'open-crate' }
-  | { kind: 'toggle-gate' }
-  | { kind: 'talk-npc' }
+  | { kind: 'mount'; sprite: string; scale: number; tint: number | null; targetIndex: number }
+  | { kind: 'dismount'; sprite: string; scale: number; tint: number | null; targetIndex: number }
+  | { kind: 'open-crate'; targetIndex: number }
+  | { kind: 'toggle-gate'; targetIndex: number }
+  | { kind: 'talk-npc'; targetIndex: number }
 
 export const ACTION_CURSOR: Record<ActionKind, { texture: string; scale: number } | 'tool'> = {
   'untie-rope':    { texture: 'cursor_x', scale: 2 },
@@ -129,85 +129,109 @@ export interface ClickHandlers {
   spawnCrumbs(x: number, y: number, color: number): void
   fireBullet(tx: number, ty: number, spread: number): boolean
   throwRope(tx: number, ty: number): boolean
-  tryDestroyCrate(wx: number, wy: number): boolean
-  tryDestroyPost(wx: number, wy: number): boolean
-  tryDestroyGate(wx: number, wy: number): boolean
-  tryDestroyPlot(wx: number, wy: number): boolean
-  tryDestroyPipe(wx: number, wy: number): boolean
+  tryDestroyCrate(targetIndex: number): boolean
+  tryDestroyPost(targetIndex: number): boolean
+  tryDestroyGate(targetIndex: number): boolean
+  tryDestroyPlot(targetIndex: number): boolean
+  tryDestroyPipe(targetIndex: number): boolean
   tryDestroyWood(wx: number, wy: number): boolean
   tryChop(wx: number, wy: number): boolean
   tryMine(wx: number, wy: number): boolean
   tryDig(wx: number, wy: number): boolean
   tryAxeEnemy(wx: number, wy: number): boolean
   tryPlaceCrate(wx: number, wy: number): boolean
-  tryOpenCrate(wx: number, wy: number): boolean
-  tryToggleGate(wx: number, wy: number): boolean
+  tryOpenCrate(targetIndex: number): boolean
+  tryToggleGate(targetIndex: number): boolean
 }
 
 export function dispatchClick(
   ctx: WorldContext,
   handlers: ClickHandlers,
+  action: ItemAction | null,
   clickX: number,
   clickY: number,
 ): boolean {
-  if (handlers.untieRope(clickX, clickY)) return true
+  if (!action) return false
 
-  const sel = state.inventory[state.selectedInventorySlot]
-  const heldType = sel?.type ?? null
-  const heldDef = heldType ? ITEMS[heldType] : null
+  switch (action.kind) {
+    case 'untie-rope':
+      return handlers.untieRope(clickX, clickY)
 
-  if (heldDef?.edible) {
-    if (handlers.eatFromSlot()) {
-      if (heldDef.crumbColor != null) handlers.spawnCrumbs(ctx.playerX(), ctx.playerY(), heldDef.crumbColor)
-      return true
-    }
-    return false
+    case 'eat-food':
+      if (handlers.eatFromSlot()) {
+        const sel = state.inventory[state.selectedInventorySlot]
+        const heldType = sel?.type ?? null
+        const heldDef = heldType ? ITEMS[heldType] : null
+        if (heldDef?.crumbColor != null) handlers.spawnCrumbs(ctx.playerX(), ctx.playerY(), heldDef.crumbColor)
+        return true
+      }
+      return false
+
+    case 'chop-tree':
+      handlers.setAxeSwung(true)
+      if (handlers.tryAxeEnemy(clickX, clickY)) return true
+      return handlers.tryChop(clickX, clickY)
+
+    case 'mine-rock':
+      handlers.setAxeSwung(true)
+      return handlers.tryMine(clickX, clickY)
+
+    case 'destroy-post':
+      handlers.setAxeSwung(true)
+      if (handlers.tryAxeEnemy(clickX, clickY)) return true
+      return handlers.tryDestroyPost(action.targetIndex)
+
+    case 'destroy-crate':
+      handlers.setAxeSwung(true)
+      if (handlers.tryAxeEnemy(clickX, clickY)) return true
+      return handlers.tryDestroyCrate(action.targetIndex)
+
+    case 'destroy-gate':
+      handlers.setAxeSwung(true)
+      if (handlers.tryAxeEnemy(clickX, clickY)) return true
+      return handlers.tryDestroyGate(action.targetIndex)
+
+    case 'destroy-plot':
+      handlers.setAxeSwung(true)
+      if (handlers.tryAxeEnemy(clickX, clickY)) return true
+      return handlers.tryDestroyPlot(action.targetIndex)
+
+    case 'destroy-pipe':
+      handlers.setAxeSwung(true)
+      if (handlers.tryAxeEnemy(clickX, clickY)) return true
+      return handlers.tryDestroyPipe(action.targetIndex)
+
+    case 'destroy-wood':
+      handlers.setAxeSwung(true)
+      if (handlers.tryAxeEnemy(clickX, clickY)) return true
+      return handlers.tryDestroyWood(clickX, clickY)
+
+    case 'tool-generic':
+      handlers.setAxeSwung(true)
+      if (handlers.tryAxeEnemy(clickX, clickY)) return true
+      return false
+
+    case 'throw-rope':
+      return handlers.throwRope(clickX, clickY)
+
+    case 'aim':
+      return handlers.fireBullet(clickX, clickY, ITEMS[state.inventory[state.selectedInventorySlot]!.type].gunSpread!)
+
+    case 'dig':
+      return handlers.tryDig(clickX, clickY)
+
+    case 'place-crate':
+      return handlers.tryPlaceCrate(clickX, clickY)
+
+    case 'open-crate':
+      return handlers.tryOpenCrate(action.targetIndex)
+
+    case 'toggle-gate':
+      return handlers.tryToggleGate(action.targetIndex)
+
+    default:
+      return false
   }
-
-  if (heldDef?.chopping != null) {
-    handlers.setAxeSwung(true)
-    if (handlers.tryAxeEnemy(clickX, clickY)) return true
-    if (handlers.tryChop(clickX, clickY)) return true
-    if (handlers.tryDestroyPost(clickX, clickY)) return true
-    if (handlers.tryDestroyCrate(clickX, clickY)) return true
-    if (handlers.tryDestroyGate(clickX, clickY)) return true
-    if (handlers.tryDestroyPlot(clickX, clickY)) return true
-    if (handlers.tryDestroyPipe(clickX, clickY)) return true
-    if (handlers.tryDestroyWood(clickX, clickY)) return true
-    return false
-  }
-
-  if (heldDef?.mining != null) {
-    handlers.setAxeSwung(true)
-    if (handlers.tryMine(clickX, clickY)) return true
-    if (handlers.tryDestroyPost(clickX, clickY)) return true
-    if (handlers.tryDestroyCrate(clickX, clickY)) return true
-    if (handlers.tryDestroyGate(clickX, clickY)) return true
-    if (handlers.tryDestroyPlot(clickX, clickY)) return true
-    if (handlers.tryDestroyPipe(clickX, clickY)) return true
-    if (handlers.tryDestroyWood(clickX, clickY)) return true
-    return false
-  }
-
-  if (heldType === 'rope') {
-    return handlers.throwRope(clickX, clickY)
-  }
-
-  const selDef = sel ? ITEMS[sel.type] : null
-  if (selDef && selDef.gunSpread != null) {
-    // The GunController behind the handler owns ammo, cadence, and reload.
-    return handlers.fireBullet(clickX, clickY, selDef.gunSpread)
-  }
-
-  if (heldType === 'shovel') {
-    return handlers.tryDig(clickX, clickY)
-  }
-
-  if (handlers.tryPlaceCrate(clickX, clickY)) return true
-  if (handlers.tryOpenCrate(clickX, clickY)) return true
-  if (handlers.tryToggleGate(clickX, clickY)) return true
-
-  return false
 }
 
 export function resolveAction(
@@ -232,11 +256,16 @@ export function resolveAction(
   }
 
   if (isDestroyTool) {
-    if (ctx.canDestroyPost(worldX, worldY) !== null) return { kind: 'destroy-post' }
-    if (ctx.canDestroyCrate(worldX, worldY) !== null) return { kind: 'destroy-crate' }
-    if (ctx.canDestroyGate(worldX, worldY) !== null) return { kind: 'destroy-gate' }
-    if (ctx.canDestroyPlot(worldX, worldY) !== null) return { kind: 'destroy-plot' }
-    if (ctx.canDestroyPipe(worldX, worldY) !== null) return { kind: 'destroy-pipe' }
+    const postIdx = ctx.canDestroyPost(worldX, worldY)
+    if (postIdx !== null) return { kind: 'destroy-post', targetIndex: postIdx }
+    const crateIdx = ctx.canDestroyCrate(worldX, worldY)
+    if (crateIdx !== null) return { kind: 'destroy-crate', targetIndex: crateIdx }
+    const gateIdx = ctx.canDestroyGate(worldX, worldY)
+    if (gateIdx !== null) return { kind: 'destroy-gate', targetIndex: gateIdx }
+    const plotIdx = ctx.canDestroyPlot(worldX, worldY)
+    if (plotIdx !== null) return { kind: 'destroy-plot', targetIndex: plotIdx }
+    const pipeIdx = ctx.canDestroyPipe(worldX, worldY)
+    if (pipeIdx !== null) return { kind: 'destroy-pipe', targetIndex: pipeIdx }
     if (ctx.canDestroyWood(worldX, worldY)) return { kind: 'destroy-wood' }
     if (tool?.chopping != null && ctx.canChopTree(worldX, worldY)) return { kind: 'chop-tree', sprite: tool.sprite, scale: tool.scale }
   }
@@ -254,7 +283,7 @@ export function resolveAction(
     if (heldType === 'mallet') {
       return { kind: 'tool-generic', sprite: tool.sprite, scale: tool.scale }
     }
-    if (heldType === 'shovel' && inRange) {
+    if (tool?.digging != null && inRange) {
       return { kind: 'dig', sprite: tool.sprite, scale: tool.scale }
     }
     if (heldType === 'cottonwood_sapling') {
@@ -319,26 +348,29 @@ export function resolveAction(
     return null
   }
 
-  if (ctx.canToggleGate(worldX, worldY) !== null) return { kind: 'toggle-gate' }
+  const gateToggleIdx = ctx.canToggleGate(worldX, worldY)
+  if (gateToggleIdx !== null) return { kind: 'toggle-gate', targetIndex: gateToggleIdx }
 
   if (state.mounted !== null) {
     const di = ctx.canDismount(worldX, worldY)
     if (di !== null) {
       const h = state.honses[di]
-      return { kind: 'dismount', sprite: h.sprite, scale: 1, tint: h.tinted ? h.tint : null }
+      return { kind: 'dismount', sprite: h.sprite, scale: 1, tint: h.tinted ? h.tint : null, targetIndex: di }
     }
   }
 
   if (state.mounted === null) {
-    if (ctx.canOpenCrate(worldX, worldY) !== null) return { kind: 'open-crate' }
-    if (ctx.canTalkToNpc(worldX, worldY) !== null) return { kind: 'talk-npc' }
+    const crateOpenIdx = ctx.canOpenCrate(worldX, worldY)
+    if (crateOpenIdx !== null) return { kind: 'open-crate', targetIndex: crateOpenIdx }
+    const npcIdx = ctx.canTalkToNpc(worldX, worldY)
+    if (npcIdx !== null) return { kind: 'talk-npc', targetIndex: npcIdx }
   }
 
   if (state.mounted === null && !ctx.isRopeAttached()) {
     const mi = ctx.canMount()
     if (mi !== null) {
       const h = state.honses[mi]
-      return { kind: 'mount', sprite: h.sprite, scale: 1, tint: h.tinted ? h.tint : null }
+      return { kind: 'mount', sprite: h.sprite, scale: 1, tint: h.tinted ? h.tint : null, targetIndex: mi }
     }
   }
 

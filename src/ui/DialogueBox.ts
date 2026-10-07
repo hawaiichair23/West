@@ -9,11 +9,13 @@ interface DialogueOption {
 export interface DialogueLine {
   text: string
   speaker?: string
+  header?: string
   options?: DialogueOption[]
 }
 
 const DEPTH = 13000
 const PANEL_H = 180
+const TEXT_MAX_W = 640
 const SIDE_PAD = 24
 const TOP_PAD = 16
 const BORDER = 2
@@ -36,6 +38,7 @@ export class DialogueBox {
   private innerBorder: Phaser.GameObjects.Rectangle
   private bg: Phaser.GameObjects.Rectangle
   private speakerText: Phaser.GameObjects.BitmapText
+  private headerText: Phaser.GameObjects.BitmapText
   private bodyText: Phaser.GameObjects.BitmapText
   private continueIndicator: Phaser.GameObjects.BitmapText
   private optionRowBgs: Phaser.GameObjects.Rectangle[] = []
@@ -49,6 +52,7 @@ export class DialogueBox {
   private typing = false
   private accumMs = 0
   private open = false
+  private closeKeyHeld = false
   private options: DialogueOption[] = []
 
   private keyHandler: ((event: KeyboardEvent) => void) | null = null
@@ -77,8 +81,12 @@ export class DialogueBox {
     this.speakerText = scene.add.bitmapText(this.leftEdge + SIDE_PAD, this.panelY + TOP_PAD, 'main', '', FONT.name)
       .setOrigin(0, 0).setTint(COLORS.white).setDepth(DEPTH + 4).setVisible(false)
 
-    this.bodyText = scene.add.bitmapText(this.panelX, this.panelY + TOP_PAD + 28, 'main', '', FONT.name)
-      .setOrigin(0.5, 0).setCenterAlign().setMaxWidth(this.panelW - SIDE_PAD * 2).setTint(COLORS.uiText)
+    this.headerText = scene.add.bitmapText(this.panelX, this.panelY + TOP_PAD + 7, 'main', '', FONT.name)
+      .setOrigin(0.5, 0).setCenterAlign().setTint(COLORS.white).setDepth(DEPTH + 4).setVisible(false)
+
+    this.bodyText = scene.add.bitmapText(this.panelX, this.panelY + TOP_PAD + 47, 'main', '', FONT.name)
+      .setOrigin(0.5, 0).setCenterAlign().setMaxWidth(TEXT_MAX_W).setTint(COLORS.uiText)
+      .setLineSpacing(12)
       .setDepth(DEPTH + 4).setVisible(false)
 
     this.continueIndicator = scene.add.bitmapText(this.rightEdge - SIDE_PAD, this.panelY + PANEL_H - TOP_PAD, 'main', 'v', FONT.name)
@@ -109,8 +117,11 @@ export class DialogueBox {
   }
 
   isOpen(): boolean { return this.open }
+  getIgnoreInputUntil(): number { return this.ignoreInputUntil }
+  inputConsumedByClose(): boolean { return this.closeKeyHeld }
 
   openLines(lines: DialogueLine[]) {
+    if (this.open) return
     if (lines.length === 0) return
     this.lines = lines
     this.lineIdx = 0
@@ -122,13 +133,15 @@ export class DialogueBox {
   }
 
   private setWorldInputEnabled(enabled: boolean) {
-    const ow = this.scene.scene.get('Overworld')
-    if (!ow) return
-    ow.input.enabled = enabled
-    const kb = ow.input.keyboard
-    if (kb) {
-      kb.enabled = enabled
-      kb.resetKeys()
+    for (const key of ['Overworld', 'Interior']) {
+      const s = this.scene.scene.get(key)
+      if (!s) continue
+      s.input.enabled = enabled
+      const kb = s.input.keyboard
+      if (kb) {
+        kb.enabled = enabled
+        kb.resetKeys()
+      }
     }
   }
 
@@ -138,7 +151,12 @@ export class DialogueBox {
       if (this.scene.time.now < this.ignoreInputUntil) return
       if (this.options.length > 0) {
         const count = this.options.length
-        const isGrid = count === 4
+        const isGrid = count >= 3
+        const isNav = event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'ArrowLeft' || event.key === 'ArrowRight'
+        if (isNav && this.selectedOption < 0) {
+          this.selectOption(0)
+          return
+        }
         if (event.key === 'ArrowUp') {
           if (isGrid) this.selectOption(this.selectedOption >= 2 ? this.selectedOption - 2 : this.selectedOption)
           else this.selectOption(Math.max(0, this.selectedOption - 1))
@@ -158,6 +176,7 @@ export class DialogueBox {
           return
         }
         if (event.key === 'Enter' || event.key === 'e' || event.key === 'E') {
+          if (this.selectedOption < 0) return
           const opt = this.options[this.selectedOption]
           if (opt) { this.close(); opt.act() }
           return
@@ -214,6 +233,11 @@ export class DialogueBox {
     } else {
       this.speakerText.setVisible(false)
     }
+    if (line.header) {
+      this.headerText.setText(line.header).setVisible(true)
+    } else {
+      this.headerText.setVisible(false)
+    }
     this.continueIndicator.setVisible(false)
     for (const row of this.optionRowBgs) row.setVisible(false)
     for (const label of this.optionRowLabels) label.setVisible(false)
@@ -252,8 +276,8 @@ export class DialogueBox {
 
   private layoutOptions() {
     const count = this.options.length
-    this.selectedOption = 0
-    const isGrid = count === 4
+    this.selectedOption = -1
+    const isGrid = count >= 3
     const cols = isGrid ? 2 : 1
     const rows = Math.ceil(count / cols)
     const totalW = isGrid ? OPTION_ROW_W * 2 + 16 : OPTION_ROW_W
@@ -277,11 +301,15 @@ export class DialogueBox {
         label.setVisible(false)
       }
     }
-    this.positionCursor(0)
+    this.positionCursor(-1)
   }
 
   private positionCursor(idx: number) {
-    if (!this.optionCursor || idx >= this.options.length) return
+    if (!this.optionCursor) return
+    if (idx < 0 || idx >= this.options.length) {
+      this.optionCursor.setVisible(false)
+      return
+    }
     const rowBg = this.optionRowBgs[idx]
     this.optionCursor.setPosition(rowBg.x - OPTION_ROW_W / 2 - 16, rowBg.y + OPTION_ROW_H / 2).setVisible(true)
   }
@@ -309,7 +337,6 @@ export class DialogueBox {
 
   close() {
     this.detachInputListeners()
-    this.setWorldInputEnabled(true)
     this.open = false
     this.lines = []
     this.options = []
@@ -320,10 +347,21 @@ export class DialogueBox {
     this.innerBorder.setVisible(false)
     this.bg.setVisible(false)
     this.speakerText.setVisible(false)
+    this.headerText.setVisible(false)
     this.bodyText.setVisible(false)
     this.continueIndicator.setVisible(false)
     for (const row of this.optionRowBgs) row.setVisible(false)
     for (const label of this.optionRowLabels) label.setVisible(false)
     if (this.optionCursor) this.optionCursor.setVisible(false)
+    this.closeKeyHeld = true
+    const release = () => {
+      this.closeKeyHeld = false
+      window.removeEventListener('keyup', release)
+      window.removeEventListener('pointerup', release)
+    }
+    window.addEventListener('keyup', release)
+    window.addEventListener('pointerup', release)
+    this.setWorldInputEnabled(true)
+    this.scene.registry.events.emit('dialogue-closed')
   }
 }

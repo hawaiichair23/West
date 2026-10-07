@@ -278,7 +278,10 @@ export class ChunkTerrain {
       // patch gate: only bloom where the flower-noise field is high → sparse clumps
       const patch = grassSample(wx + 3300, wy + 9100, FLOWER_PATCH_CELL)
       if (patch < FLOWER_PATCH_THRESHOLD) continue
-      const roll = flowerRng()
+      const patchCX = Math.floor(wx / FLOWER_PATCH_CELL)
+      const patchCY = Math.floor(wy / FLOWER_PATCH_CELL)
+      const patchRng = makeRng((state.worldSeed ^ (patchCX * 0x1f3d) ^ (patchCY * 0x8b21) ^ 0x74a3) >>> 0)
+      const roll = patchRng()
       const key = roll < FLOWER_BLUEBONNET_CHANCE ? 'flower_bluebonnet'
         : roll < FLOWER_BLUEBONNET_CHANCE + FLOWER_FIREWHEEL_CHANCE ? 'flower_firewheel'
         : 'flower_dot'

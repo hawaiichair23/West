@@ -8,10 +8,10 @@ const LAND_OFFICE_ROWS: BuyMenuRow[] = [
   { kind: 'item', entry: { type: 'proper_deed',  buyPrice: 32000 } },
   { kind: 'item', entry: { type: 'grand_deed',   buyPrice: 64000 } },
   { kind: 'header', label: 'Fort Worth' },
-  { kind: 'item', entry: { type: 'fw_quarter_deed', buyPrice: 20000 } },
-  { kind: 'item', entry: { type: 'fw_modest_deed',  buyPrice: 40000 } },
-  { kind: 'item', entry: { type: 'fw_proper_deed',  buyPrice: 80000 } },
-  { kind: 'item', entry: { type: 'fw_grand_deed',   buyPrice: 160000 } },
+  { kind: 'item', entry: { type: 'fw_quarter_deed', buyPrice: 10000 } },
+  { kind: 'item', entry: { type: 'fw_modest_deed',  buyPrice: 20000 } },
+  { kind: 'item', entry: { type: 'fw_proper_deed',  buyPrice: 40000 } },
+  { kind: 'item', entry: { type: 'fw_grand_deed',   buyPrice: 80000 } },
 ]
 
 export type LandOfficeInteriorHandle = BuyMenuHandle

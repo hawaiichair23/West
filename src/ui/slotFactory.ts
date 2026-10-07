@@ -59,7 +59,7 @@ export function makeCountLabel(
     .setBlendMode(Phaser.BlendModes.MULTIPLY)
   const main = scene.add.bitmapText(x + 23, y + 23, 'main', String(count), COUNT_SIZE)
     .setOrigin(1, 1)
-    .setTint(COLORS.uiText)
+    .setTint(0xFFFFFF)
   const group = scene.add.container(0, 0, [shadow, main])
   if (depth !== undefined) group.setDepth(depth)
   return group
