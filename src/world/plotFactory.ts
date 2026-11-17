@@ -18,16 +18,11 @@ export interface PlotClickDeps {
   onDestroyPlot: (wx: number, wy: number) => boolean
 }
 
-export function createPlot(
-  scene: Phaser.Scene,
-  x: number,
-  y: number,
-  plotViews: PlotView[],
-  deps: PlotClickDeps,
-  preBuilt?: BuiltType,
-): number {
+export function pushPlotState(x: number, y: number, preBuilt?: BuiltType): number {
   const plotIndex = state.plots.length
   state.plots.push({
+    x,
+    y,
     built: preBuilt ?? 'empty',
     level: 1,
     lastTickAt: 0,
@@ -37,6 +32,18 @@ export function createPlot(
       ? Array.from({ length: DEPOT_SLOT_COUNT }, () => null)
       : undefined,
   })
+  return plotIndex
+}
+
+export function attachPlotView(
+  scene: Phaser.Scene,
+  plotIndex: number,
+  plotViews: PlotView[],
+  deps: PlotClickDeps,
+): PlotView {
+  const plot = state.plots[plotIndex]
+  const { x, y } = plot
+  const preBuilt = plot.built !== 'empty'
 
   const rect = scene.add.rectangle(x, y, PLOT_SIZE, PLOT_SIZE, COLORS.plotFill)
     .setStrokeStyle(2, COLORS.plotBorder)
@@ -71,5 +78,18 @@ export function createPlot(
     }
   })
 
+  return view
+}
+
+export function createPlot(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  plotViews: PlotView[],
+  deps: PlotClickDeps,
+  preBuilt?: BuiltType,
+): number {
+  const plotIndex = pushPlotState(x, y, preBuilt)
+  attachPlotView(scene, plotIndex, plotViews, deps)
   return plotIndex
 }

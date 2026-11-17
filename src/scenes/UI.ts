@@ -241,6 +241,19 @@ export class UI extends Phaser.Scene {
     const w = this.cameras.main.width
     const h = this.cameras.main.height
 
+    const trackedReg: Array<[string, Function]> = []
+    const trackedScale: Array<[string, Function]> = []
+    const origRegOn = this.registry.events.on.bind(this.registry.events)
+    const origScaleOn = this.scale.on.bind(this.scale)
+    this.registry.events.on = ((event: string, fn: any, ctx?: any) => {
+      trackedReg.push([event, fn])
+      return origRegOn(event, fn, ctx)
+    }) as typeof this.registry.events.on
+    this.scale.on = ((event: string, fn: any, ctx?: any) => {
+      trackedScale.push([event, fn])
+      return origScaleOn(event, fn, ctx)
+    }) as typeof this.scale.on
+
     this.buildControlHints()
 
 
@@ -250,17 +263,15 @@ export class UI extends Phaser.Scene {
     this.cursorController = new CursorController(this)
 
     // top bar
-    this.topBar = this.add.rectangle(0, 0, w, BAR_HEIGHT, COLORS.black).setOrigin(0, 0).setAlpha(0.95)
+    this.topBar = this.add.rectangle(0, 0, w, BAR_HEIGHT, COLORS.uiBarBg).setOrigin(0, 0)
     const initialGold = (this.registry.get('gold') as number | undefined) ?? 0
-    // Gold readout is two pieces: the Polaris "-GOLD-" label (western styling)
-    // and the amount in the everyday bitmap font (readable digits). Only the
-    // amount changes on update; the label is fixed width.
-    this.goldText = this.add.text(12, BAR_HEIGHT / 2 + 2, `-GOLD-`, { fontFamily: 'Polaris', fontSize: '14px', color: '#FFFFFF' })
+    const goldLabelColor = `#${COLORS.uiText.toString(16).padStart(6, '0')}`
+    this.goldText = this.add.text(12, BAR_HEIGHT / 2 + 2, `-GOLD-`, { fontFamily: 'Polaris', fontSize: '14px', color: goldLabelColor })
       .setOrigin(0, 0.5)
     const goldAmountX = this.goldText.x + this.goldText.width + 8
     this.goldAmountText = this.add.bitmapText(goldAmountX, BAR_HEIGHT / 2 - 2, 'everyday', `${initialGold}`, 14)
       .setOrigin(0, 0.5)
-      .setTint(0xFFFFFF)
+      .setTint(COLORS.uiText)
 
     this.registry.events.on('changedata-gold', (_p: unknown, value: number) => {
       this.goldAmountText.setText(`${value}`)
@@ -506,6 +517,13 @@ export class UI extends Phaser.Scene {
       // Pickup toasts are right/bottom anchored — re-place them against the
       // new dimensions so they don't strand themselves at the old edge.
       this.layoutPickupToasts()
+    })
+
+    this.registry.events.on = origRegOn as typeof this.registry.events.on
+    this.scale.on = origScaleOn as typeof this.scale.on
+    this.events.once('shutdown', () => {
+      for (const [e, f] of trackedReg) this.registry.events.off(e, f as any)
+      for (const [e, f] of trackedScale) this.scale.off(e, f as any)
     })
   }
 
@@ -961,8 +979,11 @@ export class UI extends Phaser.Scene {
 
   isInteractMenuOpen(): boolean { return this.interactMenuVisible }
 
-  isDialogueOpen(): boolean { return this.dialogueBox.isOpen() }
-  dialogueInputConsumed(): boolean { return this.dialogueBox.inputConsumedByClose() }
+  // Guard against being called during scene boot when dialogueBox hasn't
+  // been constructed yet — happens briefly when Overworld's pointer handlers
+  // fire before UI.create() has run to completion.
+  isDialogueOpen(): boolean { return this.dialogueBox?.isOpen() ?? false }
+  dialogueInputConsumed(): boolean { return this.dialogueBox?.inputConsumedByClose() ?? false }
 
   advanceDialogue() { this.dialogueBox.advance() }
 

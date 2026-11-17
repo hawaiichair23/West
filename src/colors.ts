@@ -24,7 +24,7 @@ export const COLORS = {
   craftSymbol: 0x9A8B7A,    // lighter gray than $, for + and arrow in crafter panel
 
   // ui (placeholders for later)
-  uiBarBg: 0x2A2520,        // dark bar bg
+  uiBarBg: 0x1A110A,        // dark brown — shared by the top HUD bar, Phaser canvas backdrop, and the main-menu left panel
   uiBarFill: 0xFFD700,      // gold
   uiText: 0xF5F0E1,         // light cream text
   uiGold: 0xDAA520,         // dark gold, for the gold counter

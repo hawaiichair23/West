@@ -1,17 +1,23 @@
 import Phaser from 'phaser'
 import OutlineFilterPlugin from 'phaser4-rex-plugins/plugins/outlinefilter-plugin.js'
 import './style.css'
+import { MenuScene } from './scenes/MenuScene'
 import { Overworld } from './scenes/Overworld'
 import { UI } from './scenes/UI'
 import { Interior } from './scenes/Interior'
 import { state } from './game/state'
 import { ITEMS, type ItemType } from './items/types'
+import { saveWorld } from './game/save'
+import { COLORS } from './colors'
 
 import { spawnTumbleweed } from './world/tumbleweed'
 
 // Kick off the Polaris web font load up front so it's ready before any
 // dialogue text renders (avoids a fallback-font flash on first use).
 document.fonts.load('16px Polaris')
+// Retrogression is used for the main-menu WEST logo. Preload for the same
+// reason — the menu shows on first paint and we don't want a flash.
+document.fonts.load('160px Retrogression')
 
 
 const game = new Phaser.Game({
@@ -20,7 +26,7 @@ const game = new Phaser.Game({
   width: 1920,
   height: 1080,
   pixelArt: true,
-  backgroundColor: '#2A2520',
+  backgroundColor: `#${COLORS.uiBarBg.toString(16).padStart(6, '0')}`,
   scale: {
     mode: Phaser.Scale.RESIZE,
   },
@@ -32,7 +38,10 @@ const game = new Phaser.Game({
       constraintIterations: 1,
     },
   },
-  scene: [Overworld, UI, Interior],
+  // MenuScene must be first so Phaser auto-starts it instead of Overworld.
+  // Overworld now boots on demand via `this.scene.start('Overworld')` from
+  // the menu.
+  scene: [MenuScene, Overworld, UI, Interior],
   plugins: {
     global: [{
       key: 'rexOutlineFilter',
@@ -59,6 +68,44 @@ document.addEventListener('fullscreenchange', () => game.scale.updateBounds())
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) game.loop.sleep()
   else game.loop.wake()
+})
+
+// ESC toggles the main menu over the live scene. Pause/sleep (never stop)
+// so HUD, cursor, inventory bindings and interior state survive the overlay.
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return
+  const anyState = state as unknown as Record<string, unknown>
+
+  if (game.scene.isActive('MenuScene')) {
+    if (!game.scene.isPaused('Overworld')) return
+    anyState.menuPreview = false
+    anyState.pausedSlotId = null
+    const ow = game.scene.getScene('Overworld')
+    if (ow?.input) ow.input.enabled = true
+    if (ow?.input?.keyboard) ow.input.keyboard.enabled = true
+    game.scene.resume('Overworld')
+    if (game.scene.isSleeping('UI')) game.scene.wake('UI')
+    if (game.scene.isSleeping('Interior')) game.scene.wake('Interior')
+    game.scene.stop('MenuScene')
+    return
+  }
+
+  if (!game.scene.isActive('Overworld')) return
+
+  const slotId = anyState.currentSlotId as string | undefined
+  if (slotId) saveWorld(slotId)
+
+  anyState.menuPreview = true
+  anyState.pausedSlotId = slotId ?? null
+
+  const ow = game.scene.getScene('Overworld')
+  if (ow?.input) ow.input.enabled = false
+  if (ow?.input?.keyboard) ow.input.keyboard.enabled = false
+
+  if (game.scene.isActive('UI')) game.scene.sleep('UI')
+  if (game.scene.isActive('Interior')) game.scene.sleep('Interior')
+  game.scene.pause('Overworld')
+  game.scene.start('MenuScene')
 })
 
 // ---- developer console commands ----

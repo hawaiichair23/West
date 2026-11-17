@@ -30,10 +30,8 @@ export const Terrain = { Salt: 0, Grass: 1, Water: 2, CrackedDirt: 3, PathDirt: 
 export type Terrain = (typeof Terrain)[keyof typeof Terrain]
 export const TERRAIN_TILE = 16
 export const WOOD_TILE = 24
-// Initial world size in pixels. This is the ONLY place the starting size is
-// written — worldBounds and the terrain grid derive from it, and growWorld()
-// resizes them at runtime.
 const INITIAL_WORLD_PX = 576 * 8
+export const WORLD_ORIGIN: Readonly<{ minX: number; minY: number; width: number; height: number }> = { minX: 0, minY: 0, width: INITIAL_WORLD_PX, height: INITIAL_WORLD_PX }
 
 export const PLAYER_BASE_SPEED = 135
 
@@ -90,6 +88,8 @@ export interface WalkableInteriorItemInstance {
 }
 
 export interface PlotState {
+  x: number
+  y: number
   built: BuildingType
   level: number          // building upgrade level, starts at 1
   lastTickAt: number   // state.gameTime ms of the last completed gold tick
@@ -284,27 +284,6 @@ class GameState {
   // Dirt patches left by the shovel — visual scars in the world that persist
   // across the play session.
   dugSpots: { x: number; y: number }[] = []
-  // Invisible buried items, placed by world gen. Each entry is consumed when
-  // the player digs within reveal radius.
-  buriedItems: { x: number; y: number; reward: number }[] = []
-  // Invisible buried gems, placed by world gen. Seeded fresh each load from the
-  // layout (deterministic from seed), like buriedItems. Consumed on dig.
-  buriedGems: { x: number; y: number; type: string }[] = []
-  // Invisible buried lockboxes, placed by world gen. The contents inside are
-  // pre-rolled at gen time (seeded) so the same world always yields the same
-  // prizes from the same box. Slots 0-2 are tools (up to 3, no repeats, null
-  // for empty); slots 3+ are side loot (bars/gems/ammo/etc, null for empty).
-  // Consumed on dig.
-  buriedLockboxes: {
-    x: number
-    y: number
-    lockboxType: 'silver_lockbox' | 'gold_lockbox'
-    tools: (string | null)[]
-    side: ({ type: string; count: number } | null)[]
-  }[] = []
-  // Invisible buried keys, placed by world gen at the same density and tier
-  // split as lockboxes. Dug up, drops as the corresponding key item.
-  buriedKeys: { x: number; y: number; keyType: 'silver_key' | 'gold_key' }[] = []
   // Item stacks buried by the player. Stored when a dropped item is buried
   // by a shovel-click on a dirt patch. Revealed when the spot is dug again.
   buriedStacks: { x: number; y: number; stack: ItemStack }[] = []
@@ -322,16 +301,10 @@ class GameState {
   revealedItems: { x: number; y: number; reward: number }[] = []
   // Items dropped by the player into the world — walk over them to pick up.
   droppedItems: { x: number; y: number; stack: ItemStack }[] = []
-  // Trees and saplings planted by the player. Each entry persists as a sprite
-  // in the world. `stage` distinguishes a walk-through sapling (diggable, no
-  // collision) from a mature tree (solid trunk obstacle, felled with an axe).
-  // `plantedAt` is the state.gameTime stamp set when a sapling is planted; the
-  // overworld grows it to mature once enough time has elapsed. Only saplings
-  // carry it — mature/stump and hand-placed trees leave it undefined.
   plantedTrees: { x: number; y: number; kind: 'cottonwood'; stage: 'sapling' | 'mature' | 'stump' | 'dead'; plantedAt?: number }[] = []
-  // Scattered grass bushes (seeded worldgen). Visual-only, no collision; ride the
-  // same camera-cull lifecycle as trees. Data persists here; sprites are transient.
-  scatteredBushes: { x: number; y: number }[] = []
+  felledWorldTrees: Set<string> = new Set()
+  wildlifeSpawned = false
+  worldGrown = false
   // Hitching posts placed by the player. Each entry is a sprite in the world
   // and an obstacle in collision. `species` chooses which sprite to render —
   // 'post' (weathered cottonwood gray) or 'cedar_post' (warm cedar brown).
@@ -395,9 +368,6 @@ class GameState {
 
   // Seed for this world's procedural generation. Rolled once in init() and
   // read by generateWorld — the whole world layout is a pure function of it.
-  // Stored here (rather than inline at the gen call) so it's recoverable: a
-  // future menu can display it for sharing or set it before init() to replay
-  // a specific world. 0 until init() runs.
   worldSeed = 0
 
   // The world's size and position — the single source of truth for how big
@@ -475,6 +445,11 @@ class GameState {
   // Set via window.playerSpeed() in devtools.
   playerSpeedOverride: number | null = null
 
+  // Player position in world coordinates. 0,0 means "not set yet — spawn at
+  // world center." Overworld writes this each frame so autosave captures it.
+  playerX = 0
+  playerY = 0
+
   // Convenience: true when the player has the shovel selected in the hotbar.
   // Used by overworld click handlers to disable normal clicks (gold farming,
   // opening the build menu) so a shovel-click only triggers digging.
@@ -548,22 +523,15 @@ class GameState {
     this.wood[r * this.woodCols + c] = v
   }
 
-  // Plots start empty and are created by the scene via createPlotAt — the
-  // starter farm grid plus any town/site plots — so the count isn't fixed here
-  // and grows as the map expands.
-  init() {
-    // Game starting gold: 50
+  resetAll() {
     this.gold = 50
     this.maxHealth = BASE_MAX_HEALTH
     this.health = this.maxHealth
-    // Roll this world's seed. generateWorld reads state.worldSeed, so the
-    // whole layout derives from this one number. Random per new game today;
-    // a future menu can set worldSeed before calling init() to replay a world.
-    this.worldSeed = Math.floor(Math.random() * 1e9)
-    // Reset the pausable game clock for the new game.
     this.gameTime = 0
     this.paused = false
     this.playerInWorld = true
+    this.playerX = 0
+    this.playerY = 0
     this.plots = []
     this.worldStructures = []
     this.worldSolidDecor = []
@@ -571,10 +539,6 @@ class GameState {
     this.discoveredTowns = new Set()
     this.unlockedBuildings = new Set(['mill', 'well', 'workshop'])
     this.dugSpots = []
-    this.buriedItems = []
-    this.buriedGems = []
-    this.buriedLockboxes = []
-    this.buriedKeys = []
     this.buriedStacks = []
     this.walkableInteriors = {}
     this.walkableInteriorCrates = {}
@@ -582,8 +546,10 @@ class GameState {
     this.revealedItems = []
     this.droppedItems = []
     this.plantedTrees = []
-    this.scatteredBushes = []
-    this.worldBounds = { minX: 0, minY: 0, width: INITIAL_WORLD_PX, height: INITIAL_WORLD_PX }
+    this.felledWorldTrees = new Set()
+    this.wildlifeSpawned = false
+    this.worldGrown = false
+    this.worldBounds = { ...WORLD_ORIGIN }
     this.terrainCols = INITIAL_WORLD_PX / TERRAIN_TILE
     this.terrainRows = INITIAL_WORLD_PX / TERRAIN_TILE
     this.terrain = new Uint8Array(this.terrainCols * this.terrainRows)

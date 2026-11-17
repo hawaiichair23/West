@@ -7,17 +7,18 @@ import { PLACES } from '../world/places'
 import { COLORS, FONT } from '../colors'
 import { UI_BAR_HEIGHT, UI } from './UI'
 import { tickSmeltingPlot, pushToSmeltingPlot, peekSmeltingOutput, takeSmeltingOutput } from '../game/smelting'
-import { state, BUILDINGS, getEffectiveTickMs, getStorageCap, getPlotSlotCap, createContainerContents, Terrain, TERRAIN_TILE, WOOD_TILE, PLAYER_BASE_SPEED, WORLD_WELL_CAP, rollDepotOrder, type BuiltType } from '../game/state'
+import { state, BUILDINGS, getEffectiveTickMs, getStorageCap, getPlotSlotCap, createContainerContents, Terrain, TERRAIN_TILE, WOOD_TILE, WORLD_ORIGIN, PLAYER_BASE_SPEED, WORLD_WELL_CAP, rollDepotOrder, type BuiltType } from '../game/state'
 import { runDialogue } from '../game/dialogue/runner'
 import { DIALOGUE_GRAPHS } from '../game/dialogue'
 import type { WorldCommand } from '../game/dialogue/worldCommands'
 import { previewCraft, consumeCraft } from '../items/recipes'
 import { ITEMS, CONTAINER_PHYSICS, DEFAULT_CONTAINER_PHYSICS, cloneStack, rollRarity, BAR_TYPES, LOCKBOX_PURE_QUILL_CHANCE, LOCKBOX_RARE_CHANCE, type ItemStack, type ItemDef, type ItemType } from '../items/types'
 import { generateWorld, generateRegionDecor, generateRegionBuried, buildTrail, scatterTrailTrees, scatterTrailRockClusters, pickHerdSite, makeRng, rollLockboxTools, rollLockboxSideSlots, type GenRect, type DecorItem } from '../world/gen'
+import { addWildTree, allTrees, clearWildTrees, findSaplingNear, markTreeFelled, plantSapling, promoteSaplingToMature, removePlantedTree, saplings, type TreeEntry } from '../world/trees'
 import { ChunkTerrain } from '../world/chunkTerrain'
 import { WORLD_STRUCTURES, TOWNS, type WorldStructureType } from '../world/structures'
 import { scatterSites, SITE_TEMPLATES, trailYAtX, type PlacedSite } from '../world/sites'
-import { createPlot, type PlotView } from '../world/plotFactory'
+import { createPlot, attachPlotView, type PlotView } from '../world/plotFactory'
 import { createOutlinedLabel } from '../ui/outlinedLabel'
 import { outlineIcon } from '../ui/iconOutline'
 import { stampDeedGrid, drawDeedGhost, clearDeedGhost, deedGridPlaceable } from '../world/PlotPlacer'
@@ -174,6 +175,12 @@ const PLAYER_SCALE = 2
 
 type ObstacleKind = 'tree' | 'rock' | 'post' | 'building' | 'solid_building' | 'solid' | 'crate' | 'gate' | 'trough'
 
+const WORLD_GEN_BLOCKER_KINDS: ReadonlySet<ObstacleKind> = new Set<ObstacleKind>(['rock', 'building', 'solid_building', 'solid'])
+
+function obstacleBlocker(o: { x: number; y: number; w: number; h: number }, pad: number): { x: number; y: number; radius: number } {
+  return { x: o.x + o.w / 2, y: o.y + o.h / 2, radius: Math.hypot(o.w, o.h) / 2 + pad }
+}
+
 // True if two axis-aligned rectangles overlap. First rect is center+half-extent
 // (px, py, half), second is origin+size (x, y, w, h).
 function aabbOverlap(px: number, py: number, half: number, x: number, y: number, w: number, h: number): boolean {
@@ -231,6 +238,13 @@ export class Overworld extends Phaser.Scene {
   // Decor culling: decor lives as plain data; only items near the camera get
   // live sprites. Sprites are created/destroyed as the view moves.
   private decorData: DecorItem[] = []
+  // Buried treasure data, seeded fresh each create() from generateWorld's output.
+  // These are pure cache of the world's deterministic layout — not state —
+  // so they live on the scene and never get persisted. Save file stays small.
+  private buriedItems: { x: number; y: number; reward: number }[] = []
+  private buriedGems: { x: number; y: number; type: string }[] = []
+  private buriedLockboxes: { x: number; y: number; lockboxType: 'silver_lockbox' | 'gold_lockbox'; tools: (string | null)[]; side: ({ type: string; count: number } | null)[] }[] = []
+  private buriedKeys: { x: number; y: number; keyType: 'silver_key' | 'gold_key' }[] = []
   private activeDecor: Map<number, Phaser.GameObjects.Sprite> = new Map()
   private lastDecorCullAt = 0
   private revealedSprites: Map<string, Phaser.GameObjects.Sprite> = new Map()
@@ -242,20 +256,14 @@ export class Overworld extends Phaser.Scene {
   private plantedTreeSprites: Map<string, Phaser.GameObjects.Sprite> = new Map()
   // Mature tree sprites, keyed by `x,y`, so chopping can find and fell them.
   private matureTreeSprites: Map<string, Phaser.GameObjects.Sprite> = new Map()
-  // Live bush sprites, keyed by `x,y`. Visual-only — cullBushes adds/removes these
-  // by camera proximity. Data lives in state.scatteredBushes.
   private bushSprites: Map<string, Phaser.GameObjects.Sprite> = new Map()
+  private worldBushes: Map<string, { x: number; y: number }> = new Map()
   // Tree shadow sprites, keyed by `x,y`, so felling can destroy the shadow too.
   private treeShadowSprites: Map<string, Phaser.GameObjects.Sprite> = new Map()
   // Axe hit counts per mature tree, keyed by `x,y`. Resets when the tree fells.
   // NOT cleared by tree culling — chop progress survives a tree going off-screen
   // and coming back, since it lives here and not on the (transient) sprite.
   private treeHits: Map<string, number> = new Map()
-  // Live trunk obstacle + rope-blocker body per instantiated tree, keyed by
-  // `x,y`. cullTrees adds an entry when a tree enters view, removes it (and
-  // splices the obstacle, removes the body) when it leaves. Saplings have no
-  // entry (no collision). The data lives in state.plantedTrees; this is only
-  // the transient physics for trees currently near the camera.
   private activeTreeBodies: Map<string, { obs: { x: number; y: number; w: number; h: number; kind: ObstacleKind }; body: MatterJS.BodyType }> = new Map()
   // Rock tile sprites, keyed by `x,y` of each individual tile.
   private rockSprites: Map<string, Phaser.GameObjects.Sprite> = new Map()
@@ -429,8 +437,17 @@ export class Overworld extends Phaser.Scene {
 
   create() {
     loadSprites(this)
-    state.init()
+    clearWildTrees()
     this.registry.set('gold', state.gold)
+    const detachRegistry = () => {
+      this.registry.events.off('world_command')
+      this.registry.events.off('buy-building')
+      this.registry.events.off('interior-entered')
+      this.registry.events.off('interact-menu-dismissed')
+      this.registry.events.off('interior-exited')
+    }
+    this.events.once('shutdown', detachRegistry)
+    this.events.once('destroy', detachRegistry)
     this.registry.events.on('world_command', (cmd: WorldCommand) => this.executeWorldCommand(cmd))
 
     // world background 
@@ -669,33 +686,23 @@ export class Overworld extends Phaser.Scene {
       if (!state.getSelectedTool() && this.toggleGate(p.worldX, p.worldY)) return
     })
 
-    // Starter farm: PLOT_COLS×PLOT_ROWS plots, evenly spaced, centered on the
-    // world. Each goes through createPlotAt — the same path site/town plots use,
-    // so there's one plot-creation routine and plots can live anywhere.
-    const cx = state.worldBounds.minX + state.worldBounds.width / 2
-    const cy = state.worldBounds.minY + state.worldBounds.height / 2
-    const totalW = (PLOT_COLS - 1) * PLOT_SPACING
-    const totalH = (PLOT_ROWS - 1) * PLOT_SPACING
-    const startX = cx - totalW / 2
-    const startY = cy - totalH / 2
+    const cx = WORLD_ORIGIN.minX + WORLD_ORIGIN.width / 2
+    const cy = WORLD_ORIGIN.minY + WORLD_ORIGIN.height / 2
 
-    for (let r = 0; r < PLOT_ROWS; r++) {
-      for (let c = 0; c < PLOT_COLS; c++) {
-        this.createPlotAt(startX + c * PLOT_SPACING, startY + r * PLOT_SPACING)
-      }
+    const plotDeps = {
+      onPipeClick: (wx: number, wy: number) => this.handlePipeClick(wx, wy),
+      onDestroyPlot: (wx: number, wy: number) => this.tryDestroyPlot(wx, wy),
     }
-
-    this.createPlotAt(startX - PLOT_SPACING, startY + PLOT_ROWS * PLOT_SPACING, 'depot')
-    {
-      const depotIndex = this.plotViews.length - 1
-      const view = this.plotViews[depotIndex]
-      view.building = this.add.sprite(view.x, view.y, 'depot').setScale(SPRITE_SCALE).setDepth(view.y + 8)
+    for (let i = 0; i < state.plots.length; i++) {
+      const plot = state.plots[i]
+      const view = attachPlotView(this, i, this.plotViews, plotDeps)
+      if (plot.built === 'empty') continue
+      view.priceTag.destroy()
+      view.building = this.add.sprite(view.x, view.y, plot.built).setScale(SPRITE_SCALE).setDepth(view.y + 8)
       const plotAABB = { x: view.x - 24, y: view.y - 24, w: 48, h: 48, kind: 'building' as ObstacleKind }
       this.obstacles.push(plotAABB)
-      this.plotBlockerBodies.set(depotIndex, this.addBlocker(plotAABB))
-      const plot = state.plots[depotIndex]
-      if (!plot.depotOrder) plot.depotOrder = rollDepotOrder()
-      const def = BUILDINGS['depot']
+      this.plotBlockerBodies.set(i, this.addBlocker(plotAABB))
+      const def = BUILDINGS[plot.built]
       view.nameLabel = createOutlinedLabel(
         this,
         view.x,
@@ -707,7 +714,10 @@ export class Overworld extends Phaser.Scene {
         COLORS.black,
         2,
       ).setDepth(100000)
-      this.buildDepotBubbles(depotIndex)
+      if (plot.built === 'depot') {
+        if (!plot.depotOrder) plot.depotOrder = rollDepotOrder()
+        this.buildDepotBubbles(i)
+      }
     }
 
     // Trail-side sites (houses + towns) and the authored lone house are
@@ -752,7 +762,7 @@ export class Overworld extends Phaser.Scene {
     const tightExclusions = this.plotViews.map(v => ({ x: v.x, y: v.y, radius: 61 }))
     const layout = generateWorld({
       seed: state.worldSeed,
-      worldSize: state.worldBounds.width,
+      worldSize: WORLD_ORIGIN.width,
       exclusions,
       tightExclusions,
     })
@@ -809,11 +819,30 @@ export class Overworld extends Phaser.Scene {
     // get the pickaxe. The seeded cluster above is the real deposit; this is
     // the tutorial anchor.
     this.spawnRockFormation(cx - 240, cy + 380)
-    // seed buried items from the layout
-    state.buriedItems = layout.buried.map(b => ({ x: b.x, y: b.y, reward: b.reward }))
-    state.buriedGems = layout.buriedGems.map(g => ({ x: g.x, y: g.y, type: g.type }))
-    state.buriedLockboxes = layout.buriedLockboxes.map(lb => ({ x: lb.x, y: lb.y, lockboxType: lb.lockboxType, tools: lb.tools.slice(), side: lb.side.slice() }))
-    state.buriedKeys = layout.buriedKeys.map(k => ({ x: k.x, y: k.y, keyType: k.keyType }))
+    // Seed buried treasure from the layout into scene-local caches, then
+    // filter out anything the player has already dug up (positions live in
+    // state.dugSpots). Buried arrays are regenerated from the seed on every
+    // scene create — they're not persisted. dugSpots is persisted.
+    const DUG_RADIUS_SQ = 24 * 24
+    const alreadyDug = (p: { x: number; y: number }) => {
+      for (const d of state.dugSpots) {
+        const dx = d.x - p.x, dy = d.y - p.y
+        if (dx * dx + dy * dy < DUG_RADIUS_SQ) return true
+      }
+      return false
+    }
+    this.buriedItems = layout.buried
+      .map(b => ({ x: b.x, y: b.y, reward: b.reward }))
+      .filter(b => !alreadyDug(b))
+    this.buriedGems = layout.buriedGems
+      .map(g => ({ x: g.x, y: g.y, type: g.type }))
+      .filter(g => !alreadyDug(g))
+    this.buriedLockboxes = layout.buriedLockboxes
+      .map(lb => ({ x: lb.x, y: lb.y, lockboxType: lb.lockboxType, tools: lb.tools.slice(), side: lb.side.slice() }))
+      .filter(lb => !alreadyDug(lb))
+    this.buriedKeys = layout.buriedKeys
+      .map(k => ({ x: k.x, y: k.y, keyType: k.keyType }))
+      .filter(k => !alreadyDug(k))
     // restore any dirt patches already in state
     for (const d of state.dugSpots) {
       const sprite = this.add.sprite(d.x, d.y, 'dirt_patch').setScale(2).setDepth(1)
@@ -824,10 +853,6 @@ export class Overworld extends Phaser.Scene {
     this.droppedSprites = state.droppedItems.map(d =>
       this.spawnDroppedSprite(d.x, d.y, d.stack.type, false)
     )
-    // Planted trees in state are NOT instantiated here — cullTrees (run after
-    // setup, then on a throttle in update) brings in only the ones near the
-    // camera. They live as data in state.plantedTrees until then. This keeps
-    // boot cheap no matter how many trees the world holds.
     // restore any placed posts already in state
     for (const p of state.placedPosts) {
       this.placedPostKeys.add(`${p.x},${p.y}`)
@@ -1081,8 +1106,12 @@ export class Overworld extends Phaser.Scene {
       return spr
     })
 
-    state.coyotes.push(createCoyote(-24650, 2300))
-    state.coyotes.push(createCoyote(PRESTON_JUNCTION_X, 7500))
+    const spawnWildlife = !state.wildlifeSpawned
+    state.wildlifeSpawned = true
+    if (spawnWildlife) {
+      state.coyotes.push(createCoyote(-24650, 2300))
+      state.coyotes.push(createCoyote(PRESTON_JUNCTION_X, 7500))
+    }
     this.coyoteSprites = state.coyotes.map(c =>
       this.add.sprite(c.x, c.y, 'coyote').setScale(2).setDepth(c.y - 8)
     )
@@ -1103,18 +1132,22 @@ export class Overworld extends Phaser.Scene {
 
 
 
-    const bisonHerdId = state.nextHerdId++
-    const bisonCx = -28000
-    const bisonCy = 2300
-    for (let i = 0; i < 5; i++) {
-      const angle = this.honseRng() * Math.PI * 2
-      const radius = 80 + this.honseRng() * 220
-      this.spawnHonse(bisonCx + Math.cos(angle) * radius, bisonCy + Math.sin(angle) * radius, false, false, 'bison', bisonHerdId, i === 0)
+    if (spawnWildlife) {
+      const bisonHerdId = state.nextHerdId++
+      const bisonCx = -28000
+      const bisonCy = 2300
+      for (let i = 0; i < 5; i++) {
+        const angle = this.honseRng() * Math.PI * 2
+        const radius = 80 + this.honseRng() * 220
+        this.spawnHonse(bisonCx + Math.cos(angle) * radius, bisonCy + Math.sin(angle) * radius, false, false, 'bison', bisonHerdId, i === 0)
+      }
     }
 
-    // player at world center. Depth = y, so sprites south of the player render
-    // in front and sprites north render behind (standard overhead y-sort).
-    this.player = this.add.sprite(cx, cy, 'player').setScale(PLAYER_SCALE).setDepth(cy)
+    // Player at world center on a fresh world, otherwise at the last saved
+    // position. state.playerX/Y = 0 means "not set" — use the spawn default.
+    const px = state.playerX || cx
+    const py = state.playerY || cy
+    this.player = this.add.sprite(px, py, 'player').setScale(PLAYER_SCALE).setDepth(py)
 
     if (state.npcs.length === 0) {
     }
@@ -1208,15 +1241,13 @@ export class Overworld extends Phaser.Scene {
     cam.setViewport(0, 0, cam.width, cam.height)
     cam.startFollow(this.player)
     cam.setBounds(state.worldBounds.minX, state.worldBounds.minY, state.worldBounds.width, state.worldBounds.height)
-    cam.setZoom(1.10)
+    cam.setZoom(1.17)
 
-    // Safe zones: the original map bounds (captured before the permanent grows
-    // below) are a no-combat area. Fort Worth will append a second zone later.
     this.safeZones = [{
-      x: state.worldBounds.minX,
-      y: state.worldBounds.minY,
-      w: state.worldBounds.width,
-      h: state.worldBounds.height,
+      x: WORLD_ORIGIN.minX,
+      y: WORLD_ORIGIN.minY,
+      w: WORLD_ORIGIN.width,
+      h: WORLD_ORIGIN.height,
     }]
     // initialize the key so the first real transition fires changedata (not setdata)
     this.registry.set('inCombat', state.heartsRevealed)
@@ -1224,13 +1255,7 @@ export class Overworld extends Phaser.Scene {
     this.registry.set('playerMaxHealth', state.maxHealth)
 
 
-    // Permanent westward expansion. Runs AFTER the player and plots were placed
-    // at the original world center, so the spawn/town stays exactly where it is
-    // and the new frontier extends west of it. growWorld re-syncs the camera
-    // bounds, background, and fills the strip with scatter decor.
-    this.growWorld('west', PERMANENT_WEST_PX)
-    this.growWorld('north', PERMANENT_VERTICAL_PX)
-    this.growWorld('south', PERMANENT_VERTICAL_PX)
+    this.applyPermanentGrows()
 
     // West grass is a no-combat zone: the whole Fort Worth grass band (from the
     // western edge east by GRASS_BAND_W, full height) is appended as a second
@@ -1430,31 +1455,28 @@ export class Overworld extends Phaser.Scene {
       this.cullDecor()
     }
 
-    // Wild herd grazing off the trail, at a seed-chosen spot in the first half
-    // of the journey (near the trail, visible from it). Different world → herd
-    // somewhere new; same world → same spot. Each honse mills around its own
-    // spawn point (createHonse sets its home there), so spreading them around
-    // the center reads as a loose grazing herd rather than a stack.
-    const herdSite = pickHerdSite(TRAIL_WAYPOINTS, state.worldSeed + 9191)
-    const herdCx = herdSite.x
-    const herdCy = herdSite.y
-    const herdSpread = 250
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2
-      const r = herdSpread * (0.4 + this.honseRng() * 0.6)
-      this.spawnHonse(herdCx + Math.cos(a) * r, herdCy + Math.sin(a) * r)
-    }
+    if (spawnWildlife) {
+      const herdSite = pickHerdSite(TRAIL_WAYPOINTS, state.worldSeed + 9191)
+      const herdCx = herdSite.x
+      const herdCy = herdSite.y
+      const herdSpread = 250
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2
+        const r = herdSpread * (0.4 + this.honseRng() * 0.6)
+        this.spawnHonse(herdCx + Math.cos(a) * r, herdCy + Math.sin(a) * r)
+      }
 
-    for (let i = 0; i < 5; i++) this.spawnHonse(-53118, 4470, false, false, 'bison')
+      for (let i = 0; i < 5; i++) this.spawnHonse(-53118, 4470, false, false, 'bison')
 
-    const STARTER_HONSE_CLUSTER_R = 40
-    for (let i = 0; i < 3; i++) {
-      const ang = (i / 3) * Math.PI * 2
-      this.spawnHonse(3268 + Math.cos(ang) * STARTER_HONSE_CLUSTER_R, 1367 + Math.sin(ang) * STARTER_HONSE_CLUSTER_R)
+      const STARTER_HONSE_CLUSTER_R = 40
+      for (let i = 0; i < 3; i++) {
+        const ang = (i / 3) * Math.PI * 2
+        this.spawnHonse(3268 + Math.cos(ang) * STARTER_HONSE_CLUSTER_R, 1367 + Math.sin(ang) * STARTER_HONSE_CLUSTER_R)
+      }
     }
 
     for (const place of Object.values(PLACES)) {
-      for (const h of place.honses) this.spawnHonse(h.x, h.y, h.tame, true)
+      if (spawnWildlife) for (const h of place.honses) this.spawnHonse(h.x, h.y, h.tame, true)
       for (const t of place.trees) this.placeTree(t.x, t.y)
       for (const tr of place.troopers) {
         const spr = this.add.sprite(tr.x, tr.y, tr.sprite ?? 'cavalry_trooper').setScale(PLAYER_SCALE).setDepth(tr.y)
@@ -1633,9 +1655,8 @@ export class Overworld extends Phaser.Scene {
         roadCenterline, treeBounds, state.worldSeed + 4242,
         TREE_TRAIL_CLEARANCE, TREE_MIN_SPACING,
       )
-      const blockers = this.getBlockers(40)
+      const blockers = this.getWorldGenBlockers(40)
       for (const c of candidates) {
-        // reject near any physical obstacle or honse
         let blocked = false
         for (const b of blockers) {
           const dx = c.x - b.x
@@ -1648,9 +1669,8 @@ export class Overworld extends Phaser.Scene {
           if (Math.abs(c.x - v.x) < PLOT_SIZE / 2 && Math.abs(c.y - v.y) < PLOT_SIZE / 2) { blocked = true; break }
         }
         if (blocked) continue
-        // reject on the player spawn
-        const pdx = c.x - this.player.x
-        const pdy = c.y - this.player.y
+        const pdx = c.x - (wb.minX + wb.width / 2)
+        const pdy = c.y - (wb.minY + wb.height / 2)
         if (pdx * pdx + pdy * pdy < 40 * 40) continue
         // only on grass — keeps wild trees off dirt paths, fort interiors, sand
         if (state.terrainAt(c.x, c.y) !== Terrain.Grass) continue
@@ -1691,14 +1711,13 @@ export class Overworld extends Phaser.Scene {
         const ix1 = n01 + (n11 - n01) * sx
         return ix0 + (ix1 - ix0) * sy
       }
-      // Three octaves so cluster shapes are irregular, not a single grid.
       const noiseAt = (x: number, y: number) =>
         sample(x, y, CELL) * 0.57
         + sample(x + 9133, y + 4271, CELL / 2) * 0.29
         + sample(x + 1777, y + 8923, CELL / 4) * 0.14
 
       const overlapSq = OVERLAP * OVERLAP
-      const blockers = this.getBlockers(40)
+      const blockers = this.getWorldGenBlockers(40)
       const placed: { x: number; y: number }[] = []
 
       for (let gy = wb.minY + STEP / 2; gy < wb.minY + wb.height; gy += STEP) {
@@ -1713,7 +1732,7 @@ export class Overworld extends Phaser.Scene {
           if (rng() > prob) continue
           if (state.terrainAt(x, y) !== Terrain.Grass) continue
           if (pointToPolylineDist(x, y, roadCenterline) < 25) continue
-          if (x >= -51250 && x <= -49780 && y >= 1320 && y <= 2100) continue
+          if (x >= FORT_EAST_NO_SCATTER.minX && x <= FORT_EAST_NO_SCATTER.maxX && y >= FORT_EAST_NO_SCATTER.minY && y <= FORT_EAST_NO_SCATTER.maxY) continue
           if (x >= FORT_NO_BUILD.minX && x <= FORT_NO_BUILD.maxX && y >= FORT_NO_BUILD.minY && y <= FORT_NO_BUILD.maxY) continue
           let blocked = false
           for (const p of placed) {
@@ -1782,7 +1801,7 @@ export class Overworld extends Phaser.Scene {
         + sample(x + 1777, y + 8923, CELL / 4) * 0.14
 
       const overlapSq = OVERLAP * OVERLAP
-      const blockers = this.getBlockers(40)
+      const blockers = this.getWorldGenBlockers(40)
       const placed: { x: number; y: number }[] = []
 
       for (let gy = wb.minY + STEP / 2; gy < wb.minY + wb.height; gy += STEP) {
@@ -1827,9 +1846,13 @@ export class Overworld extends Phaser.Scene {
     // Under RESIZE scale mode the canvas matches the window, so cam.width/height
     // change whenever the window does. Re-set the viewport to the new size,
     // keeping the top-bar offset. Bounds/follow/zoom persist across this.
-    this.scale.on('resize', (gameSize: Phaser.Structs.Size) => {
+    const onResize = (gameSize: Phaser.Structs.Size) => {
       cam.setViewport(0, 0, gameSize.width, gameSize.height)
-    })
+    }
+    this.scale.on('resize', onResize)
+    const detachResize = () => this.scale.off('resize', onResize)
+    this.events.once('shutdown', detachResize)
+    this.events.once('destroy', detachResize)
 
     // Instantiate the trees near spawn now; the rest stream in via cullTrees in
     // update() as the camera moves. The camera is following the player (world
@@ -1871,8 +1894,12 @@ export class Overworld extends Phaser.Scene {
       set horseGear(v) { ow.horseGear = v },
     }
 
-    // launch the UI scene on top
-    this.scene.launch('UI')
+    // launch the UI scene on top. Skipped when Overworld is running as a
+    // menu-preview background (no HUD over the main menu). MenuScene flips
+    // the flag off and launches UI when the player actually enters the game.
+    if (!(state as unknown as Record<string, unknown>).menuPreview) {
+      this.scene.launch('UI')
+    }
 
     // input
     const kb = this.input.keyboard!
@@ -2125,12 +2152,9 @@ export class Overworld extends Phaser.Scene {
   // true while a dig is in progress — blocks new dig clicks until resolved.
   private digInProgress = false
 
-  // Places a cottonwood — terrain decides stage: grass → mature, anything else → dead.
-  private placeTree(tx: number, ty: number) {
-    const stage = state.terrainAt(tx, ty) === Terrain.Grass ? 'mature' : 'dead'
-    const entry = { x: tx, y: ty, kind: 'cottonwood' as const, stage: stage as 'mature' | 'dead' }
-    state.plantedTrees.push(entry)
-    if (this.treeInCullRange(tx, ty)) this.instantiateTree(entry)
+  private placeTree(x: number, y: number) {
+    const entry = addWildTree(x, y)
+    if (this.treeInCullRange(entry.x, entry.y)) this.instantiateTree(entry)
   }
 
   // Build the live objects (sprite + shadow + trunk obstacle + rope-blocker
@@ -2141,7 +2165,7 @@ export class Overworld extends Phaser.Scene {
   // and dead get a falling-canopy sprite (cottonwood / cottonwood_dead); a
   // felled stump uses the stump sprite. Saplings are handled separately (they
   // have their own sprite + no collision) — see instantiateSapling.
-  private instantiateTree(entry: { x: number; y: number; stage: string }) {
+  private instantiateTree(entry: TreeEntry) {
     const { x: tx, y: ty } = entry
     const key = `${tx},${ty}`
     if (this.matureTreeSprites.has(key) || this.plantedTreeSprites.has(key)) return  // already live
@@ -2198,10 +2222,10 @@ export class Overworld extends Phaser.Scene {
     }
   }
 
-  // Records a scattered bush as data. The sprite is created lazily by cullBushes
-  // when the bush is near the camera — mirroring how trees defer to cullTrees.
   private placeBush(x: number, y: number) {
-    state.scatteredBushes.push({ x: Math.floor(x), y: Math.floor(y) })
+    const bx = Math.floor(x)
+    const by = Math.floor(y)
+    this.worldBushes.set(`${bx},${by}`, { x: bx, y: by })
   }
 
   private instantiateBush(entry: { x: number; y: number }) {
@@ -2222,7 +2246,7 @@ export class Overworld extends Phaser.Scene {
     const view = this.cameras.main.worldView
     const cm = TREE_CULL_MARGIN
     const dm = TREE_CULL_DESTROY_MARGIN
-    for (const entry of state.scatteredBushes) {
+    for (const entry of this.worldBushes.values()) {
       const key = `${entry.x},${entry.y}`
       const live = this.bushSprites.has(key)
       const inCreate = entry.x >= view.x - cm && entry.x <= view.right + cm && entry.y >= view.y - cm && entry.y <= view.bottom + cm
@@ -2240,14 +2264,13 @@ export class Overworld extends Phaser.Scene {
   // sprite for the instantiated mature tree. If it's off-screen there are no
   // live objects to swap; cullTrees will instantiate it as mature (reading the
   // updated stage) whenever it next enters view.
-  private growSapling(t: { x: number; y: number; stage: string; plantedAt?: number }) {
+  private growSapling(t: TreeEntry) {
     const wasLive = this.plantedTreeSprites.has(`${t.x},${t.y}`)
-    if (wasLive) this.deinstantiateTree(t.x, t.y)   // remove the sapling sprite
+    if (wasLive) this.deinstantiateTree(t.x, t.y)
 
-    t.stage = 'mature'
-    t.plantedAt = undefined
+    promoteSaplingToMature(t)
 
-    if (wasLive) this.instantiateTree(t as { x: number; y: number; stage: string })   // bring in the mature tree + collision
+    if (wasLive) this.instantiateTree(t)
   }
 
   // Axe-click on a mature tree within range: shake it side to side as a hit
@@ -2268,7 +2291,7 @@ export class Overworld extends Phaser.Scene {
     const CHOP_HIT_RX = 18
     const CHOP_HIT_RY = 26
     const CHOP_HIT_DOWN = 14
-    for (const t of state.plantedTrees) {
+    for (const t of allTrees()) {
       if (t.stage !== 'mature' && t.stage !== 'dead') continue
       const tdx = clickX - (t.x - 6)
       const tdy = clickY - (t.y + CHOP_HIT_DOWN)
@@ -2277,7 +2300,7 @@ export class Overworld extends Phaser.Scene {
       this.applyChopHit(t, level)
       if (cleave) {
         const cleaveSq = CHOP_CLEAVE_RADIUS * CHOP_CLEAVE_RADIUS
-        for (const other of state.plantedTrees) {
+        for (const other of allTrees()) {
           if (other === t) continue
           if (other.stage !== 'mature' && other.stage !== 'dead') continue
           const odx = other.x - t.x
@@ -2300,14 +2323,14 @@ export class Overworld extends Phaser.Scene {
   // accumulate the hit amount, and fell on CHOP_HITS_TO_FELL. Fractional hits
   // come from cleave axes — closer trees get full 1.0 hits, farther ones get
   // smaller fractions, so a cluster falls in a chain instead of all at once.
-  private applyChopHit(t: { x: number; y: number; stage: string }, amount: number) {
+  private applyChopHit(t: TreeEntry, amount: number) {
     const key = `${t.x},${t.y}`
     const sprite = this.matureTreeSprites.get(key)
     if (sprite) this.shakeTree(sprite, t.x)
     const hits = (this.treeHits.get(key) ?? 0) + amount
     if (hits >= Overworld.CHOP_HITS_TO_FELL) {
       this.treeHits.delete(key)
-      this.fellTree(t as any, sprite)
+      this.fellTree(t, sprite)
     } else {
       this.treeHits.set(key, hits)
     }
@@ -2931,7 +2954,7 @@ export class Overworld extends Phaser.Scene {
     const CHOP_HIT_RX = 18
     const CHOP_HIT_RY = 26
     const CHOP_HIT_DOWN = 14
-    for (const t of state.plantedTrees) {
+    for (const t of allTrees()) {
       if (t.stage !== 'mature' && t.stage !== 'dead') continue
       const tdx = wx - (t.x - 6)
       const tdy = wy - (t.y + CHOP_HIT_DOWN)
@@ -3136,21 +3159,19 @@ export class Overworld extends Phaser.Scene {
   }
 
   // Fell a mature tree, stump revealed
-  private fellTree(t: { x: number; y: number; stage: string }, sprite?: Phaser.GameObjects.Sprite) {
+  private fellTree(t: TreeEntry, sprite?: Phaser.GameObjects.Sprite) {
     const wasDead = t.stage === 'dead'
     if (sprite) {
       this.tweens.killTweensOf(sprite)
       sprite.x = t.x
       sprite.setTexture('cottonwood_stump')
     }
-    t.stage = 'stump'
+    markTreeFelled(t)
     const shadowKey = `${t.x},${t.y}`
     const shadow = this.treeShadowSprites.get(shadowKey)
     if (shadow) { shadow.destroy(); this.treeShadowSprites.delete(shadowKey) }
 
-
-    // Falling top
-    const dir = Math.random() < 0.5 ? -1 : 1   
+    const dir = (Math.floor(t.x) + Math.floor(t.y)) & 1 ? 1 : -1   
     const CUT_ROW = 11
     const cutFrac = CUT_ROW / 16
     const falling = this.add.sprite(t.x, t.y + 9, wasDead ? 'cottonwood_dead' : 'cottonwood')
@@ -3601,17 +3622,15 @@ export class Overworld extends Phaser.Scene {
 
   // Single source of truth for everything physical on the map
   getBlockers(pad = 40): { x: number; y: number; radius: number }[] {
-    const out: { x: number; y: number; radius: number }[] = []
-    for (const o of this.obstacles) {
-      const cx = o.x + o.w / 2
-      const cy = o.y + o.h / 2
-      const radius = Math.hypot(o.w, o.h) / 2 + pad
-      out.push({ x: cx, y: cy, radius })
-    }
+    const out = this.obstacles.map(o => obstacleBlocker(o, pad))
     for (const h of state.honses) {
       out.push({ x: h.x, y: h.y, radius: 20 + pad })
     }
     return out
+  }
+
+  private getWorldGenBlockers(pad = 40): { x: number; y: number; radius: number }[] {
+    return this.obstacles.filter(o => WORLD_GEN_BLOCKER_KINDS.has(o.kind)).map(o => obstacleBlocker(o, pad))
   }
 
   private addBlocker(aabb: { x: number; y: number; w: number; h: number }): MatterJS.BodyType {
@@ -4770,52 +4789,47 @@ export class Overworld extends Phaser.Scene {
     return { x: this.player.x, y: this.player.y }
   }
 
-  // Grow the world outward by `amount` px in one direction, then re-sync the
-  // scene to the new bounds. state.growWorld() does the data work (extend
-  // bounds, resize + copy the terrain grid). Here we re-apply the things that
-  // were set once from bounds at create-time and don't read it live: the camera
-  // bounds and the cream background rect (position, size, and click hit-area).
-  // The player-movement clamp already reads worldBounds every frame, so it
-  // needs nothing. The new strip is left bare. Returns the pixels added.
-  growWorld(direction: 'west' | 'east' | 'north' | 'south', amount: number): number {
-    const before = { minX: state.worldBounds.minX, minY: state.worldBounds.minY, width: state.worldBounds.width, height: state.worldBounds.height }
-    const added = state.growWorld(direction, amount)
-    if (added === 0) return 0
-
+  // Permanent world expansion: the bounds/terrain resize happens once per world
+  // (saved via state.worldGrown); the strip decor and buried items are scene-
+  // local, so they regenerate deterministically from the seed on every boot.
+  private applyPermanentGrows() {
+    const fresh = !state.worldGrown
+    state.worldGrown = true
+    const sim = { ...WORLD_ORIGIN }
+    const grows: ['west' | 'north' | 'south', number][] = [
+      ['west', PERMANENT_WEST_PX],
+      ['north', PERMANENT_VERTICAL_PX],
+      ['south', PERMANENT_VERTICAL_PX],
+    ]
+    for (const [direction, amount] of grows) {
+      const added = Math.ceil(amount / TERRAIN_TILE) * TERRAIN_TILE
+      const before = { ...sim }
+      if (direction === 'west') { sim.minX -= added; sim.width += added }
+      else if (direction === 'north') { sim.minY -= added; sim.height += added }
+      else { sim.height += added }
+      if (fresh) state.growWorld(direction, amount)
+      const strip: GenRect = {
+        x: sim.minX,
+        y: direction === 'south' ? before.minY + before.height : sim.minY,
+        w: direction === 'west' ? added : sim.width,
+        h: direction === 'west' ? sim.height : added,
+      }
+      const stripSeed = state.worldSeed + Math.floor(strip.x) + Math.floor(strip.y)
+      const decor = generateRegionDecor(strip, stripSeed, ['pebbles', 'grass', 'cow_skull'])
+      this.decorData.push(...decor)
+      const { buried, buriedGems, buriedLockboxes, buriedKeys } = generateRegionBuried(strip, stripSeed + 1)
+      this.buriedItems.push(...buried)
+      this.buriedGems.push(...buriedGems)
+      this.buriedLockboxes.push(...buriedLockboxes)
+      this.buriedKeys.push(...buriedKeys)
+    }
     const wb = state.worldBounds
     this.cameras.main.setBounds(wb.minX, wb.minY, wb.width, wb.height)
     this.worldBg.setPosition(wb.minX + wb.width / 2, wb.minY + wb.height / 2)
     this.worldBg.setSize(wb.width, wb.height)
     const hit = this.worldBg.input?.hitArea as Phaser.Geom.Rectangle | undefined
     if (hit) { hit.width = wb.width; hit.height = wb.height }
-
-    // Fill the new strip with scatter decor at the same densities as the rest of
-    // the world. The strip is the rectangle of land just added: for east/west it
-    // spans the full new height by `added` wide; for north/south the full width
-    // by `added` tall. Seed is offset by the strip's corner so repeated grows in
-    // the same direction don't repeat the identical pattern.
-    // A west/east grow extends the world horizontally, adding a tall, narrow
-    // strip down one side (full height, `added` px wide). A north/south grow
-    // adds a short, wide strip (full width, `added` px tall).
-    const horizontalGrow = direction === 'west' || direction === 'east'
-    const strip: GenRect = {
-      x: direction === 'east' ? before.minX + before.width : wb.minX,
-      y: direction === 'south' ? before.minY + before.height : wb.minY,
-      w: horizontalGrow ? added : wb.width,
-      h: horizontalGrow ? wb.height : added,
-    }
-    const stripSeed = state.worldSeed + Math.floor(strip.x) + Math.floor(strip.y)
-    const decor = generateRegionDecor(strip, stripSeed, ['pebbles', 'grass', 'cow_skull'])
-    this.decorData.push(...decor)
-    // Buried coins and gems for the new strip, at the same densities as the
-    // original world. Without this, all treasure stays locked in the spawn box.
-    const { buried, buriedGems, buriedLockboxes, buriedKeys } = generateRegionBuried(strip, stripSeed + 1)
-    state.buriedItems.push(...buried)
-    state.buriedGems.push(...buriedGems)
-    state.buriedLockboxes.push(...buriedLockboxes)
-    state.buriedKeys.push(...buriedKeys)
     this.cullDecor()
-    return added
   }
 
   // Decor culling: only keep sprites for decor within the camera view + margin.
@@ -4875,18 +4889,11 @@ export class Overworld extends Phaser.Scene {
     return x >= view.x - m && x <= view.right + m && y >= view.y - m && y <= view.bottom + m
   }
 
-  // Tree culling: state.plantedTrees is the permanent source of truth; only
-  // trees near the camera get live sprites/obstacles/bodies. Trees entering the
-  // create margin get instantiated; trees past the (larger) destroy margin get
-  // torn down. The asymmetric margins give hysteresis so boundary trees don't
-  // flicker. Chop progress (treeHits) and stage live in data, so a tree
-  // re-instantiates in exactly the state it was last seen. Runs on the same
-  // throttle as decor.
   private cullTrees() {
     const view = this.cameras.main.worldView
     const cm = TREE_CULL_MARGIN
     const dm = TREE_CULL_DESTROY_MARGIN
-    for (const entry of state.plantedTrees) {
+    for (const entry of allTrees()) {
       const key = `${entry.x},${entry.y}`
       const live = this.matureTreeSprites.has(key) || this.plantedTreeSprites.has(key)
       const inCreate = entry.x >= view.x - cm && entry.x <= view.right + cm && entry.y >= view.y - cm && entry.y <= view.bottom + cm
@@ -4895,7 +4902,6 @@ export class Overworld extends Phaser.Scene {
       } else if (!live) {
         continue
       } else {
-        // live — destroy only once past the larger destroy margin
         const inKeep = entry.x >= view.x - dm && entry.x <= view.right + dm && entry.y >= view.y - dm && entry.y <= view.bottom + dm
         if (!inKeep) this.deinstantiateTree(entry.x, entry.y)
       }
@@ -5706,8 +5712,7 @@ export class Overworld extends Phaser.Scene {
     if (dirtSprite) { dirtSprite.destroy(); this.dugSprites.delete(spot.key) }
     state.dugSpots.splice(spot.index, 1)
 
-    const entry = { x: spot.x, y: spot.y, kind: 'cottonwood' as const, stage: 'sapling' as const, plantedAt: state.gameTime }
-    state.plantedTrees.push(entry)
+    const entry = plantSapling(spot.x, spot.y, state.gameTime)
     if (this.treeInCullRange(spot.x, spot.y)) this.instantiateSapling(entry)
     this.logPlacement('cottonwood_sapling', spot.x, spot.y)
 
@@ -5726,27 +5731,22 @@ export class Overworld extends Phaser.Scene {
     // dig up a planted tree: remove tree, leave dirt patch + sapling as a
     // revealed item that the player can walk over to claim.
     const undoSq = Overworld.DIG_MIN_SPACING * Overworld.DIG_MIN_SPACING
-    for (let i = state.plantedTrees.length - 1; i >= 0; i--) {
-      const t = state.plantedTrees[i]
-      if (t.stage !== 'sapling') continue  
-      const dx = x - t.x
-      const dy = y - t.y
-      if (dx * dx + dy * dy >= undoSq) continue
+    {
+      const t = findSaplingNear(x, y, undoSq)
+      if (t) {
+        const key = `${t.x},${t.y}`
+        this.deinstantiateTree(t.x, t.y)
+        removePlantedTree(t)
 
-      const key = `${t.x},${t.y}`
-      this.deinstantiateTree(t.x, t.y)   // remove any live sprite/obstacle/body
-      state.plantedTrees.splice(i, 1)
+        state.dugSpots.push({ x: t.x, y: t.y })
+        const dirtSprite = this.add.sprite(t.x, t.y, 'dirt_patch').setScale(2).setDepth(1)
+        this.dugSprites.set(key, dirtSprite)
 
-      // dirt patch back at the spot
-      state.dugSpots.push({ x: t.x, y: t.y })
-      const dirtSprite = this.add.sprite(t.x, t.y, 'dirt_patch').setScale(2).setDepth(1)
-      this.dugSprites.set(key, dirtSprite)
-
-      // sapling appears as a dropped item on top, walk over to pick up
-      const sapStack: ItemStack = { type: 'cottonwood_sapling', count: 1 }
-      state.droppedItems.push({ x: t.x, y: t.y, stack: sapStack })
-      this.droppedSprites.push(this.spawnDroppedSprite(t.x, t.y, 'cottonwood_sapling', true))
-      return
+        const sapStack: ItemStack = { type: 'cottonwood_sapling', count: 1 }
+        state.droppedItems.push({ x: t.x, y: t.y, stack: sapStack })
+        this.droppedSprites.push(this.spawnDroppedSprite(t.x, t.y, 'cottonwood_sapling', true))
+        return
+      }
     }
 
     for (let i = state.dugSpots.length - 1; i >= 0; i--) {
@@ -5831,12 +5831,12 @@ export class Overworld extends Phaser.Scene {
       // reveal AT MOST one buried coin within reveal radius
       const revSq = Overworld.DIG_REVEAL_RADIUS * Overworld.DIG_REVEAL_RADIUS
       let revealed = false
-      for (let i = state.buriedItems.length - 1; i >= 0; i--) {
-        const b = state.buriedItems[i]
+      for (let i = this.buriedItems.length - 1; i >= 0; i--) {
+        const b = this.buriedItems[i]
         const dx = b.x - x
         const dy = b.y - y
         if (dx * dx + dy * dy > revSq) continue
-        state.buriedItems.splice(i, 1)
+        this.buriedItems.splice(i, 1)
         const placed = { x, y, reward: b.reward }
         state.revealedItems.push(placed)
         this.spawnRevealedCoinSprite(placed.x, placed.y)
@@ -5859,12 +5859,12 @@ export class Overworld extends Phaser.Scene {
       }
 
       if (!revealed) {
-        for (let i = state.buriedGems.length - 1; i >= 0; i--) {
-          const g = state.buriedGems[i]
+        for (let i = this.buriedGems.length - 1; i >= 0; i--) {
+          const g = this.buriedGems[i]
           const dx = g.x - x
           const dy = g.y - y
           if (dx * dx + dy * dy > revSq) continue
-          state.buriedGems.splice(i, 1)
+          this.buriedGems.splice(i, 1)
           const stack = { type: g.type as ItemType, count: 1 }
           state.droppedItems.push({ x, y, stack })
           this.droppedSprites.push(this.spawnDroppedSprite(x, y, stack.type, true))
@@ -5879,12 +5879,12 @@ export class Overworld extends Phaser.Scene {
         // the ground (not a bouncing dropped item) — still locked, with the
         // pre-rolled tool already in slot 0 of its contents. Player picks it
         // up like any other placed lockbox; pickup preserves stack.contents.
-        for (let i = state.buriedLockboxes.length - 1; i >= 0; i--) {
-          const lb = state.buriedLockboxes[i]
+        for (let i = this.buriedLockboxes.length - 1; i >= 0; i--) {
+          const lb = this.buriedLockboxes[i]
           const dx = lb.x - x
           const dy = lb.y - y
           if (dx * dx + dy * dy > revSq) continue
-          state.buriedLockboxes.splice(i, 1)
+          this.buriedLockboxes.splice(i, 1)
           const contents = createContainerContents(lb.lockboxType)
           // slots 0..2: pre-rolled tools (may include nulls)
           for (let s = 0; s < lb.tools.length && s < contents.length; s++) {
@@ -5907,12 +5907,12 @@ export class Overworld extends Phaser.Scene {
       if (!revealed) {
         // Buried key dig: just an item drop, no container. Same shape as the
         // gem reveal — splice the record, drop a key stack on the ground.
-        for (let i = state.buriedKeys.length - 1; i >= 0; i--) {
-          const k = state.buriedKeys[i]
+        for (let i = this.buriedKeys.length - 1; i >= 0; i--) {
+          const k = this.buriedKeys[i]
           const dx = k.x - x
           const dy = k.y - y
           if (dx * dx + dy * dy > revSq) continue
-          state.buriedKeys.splice(i, 1)
+          this.buriedKeys.splice(i, 1)
           const stack = { type: k.keyType as ItemType, count: 1 }
           state.droppedItems.push({ x, y, stack })
           this.droppedSprites.push(this.spawnDroppedSprite(x, y, stack.type, true))
@@ -5965,6 +5965,11 @@ export class Overworld extends Phaser.Scene {
 
 
   update(_t: number, dt: number) {
+    // Mirror the player sprite's position onto state so autosave captures
+    // where the player actually is, not where they spawned.
+    state.playerX = this.player.x
+    state.playerY = this.player.y
+
     // Advance the pausable game clock. This is the ONLY site that advances it.
     // Overworld.update runs every frame even while an interior scene is open
     // (entering a building only hides this camera — the scene is never slept),
@@ -6015,8 +6020,8 @@ export class Overworld extends Phaser.Scene {
     // Grow planted saplings into mature trees once enough time has elapsed.
     // Duration scales with the dev time multiplier so window.speed() speeds it up.
     const growMs = Overworld.SAPLING_GROW_MS / Math.max(0.01, state.timeMultiplier)
-    for (const t of state.plantedTrees) {
-      if (t.stage !== 'sapling' || t.plantedAt === undefined) continue
+    for (const t of saplings()) {
+      if (t.plantedAt === undefined) continue
       if (state.terrainAt(t.x, t.y) !== Terrain.Grass) continue
       if (state.gameTime - t.plantedAt >= growMs) this.growSapling(t)
     }

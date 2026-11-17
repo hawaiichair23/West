@@ -21,6 +21,7 @@
 import Phaser from 'phaser'
 import { state } from '../game/state'
 import { ITEMS, CONTAINER_PHYSICS, DEFAULT_CONTAINER_PHYSICS } from '../items/types'
+import { allTrees } from './trees'
 import { getHonseNeckAnchor } from './honse'
 import { getCoyoteNeckAnchor } from './coyote'
 import { getBanditNeckAnchor } from './bandit'
@@ -677,7 +678,7 @@ export class RopeController {
         }
         // Trees catch the same way posts do — anchor is 8px below the tree's
         // visual center, around the lower trunk where a rope would actually wrap.
-        for (const t of state.plantedTrees) {
+        for (const t of allTrees()) {
             if (t.stage === 'sapling') continue   // saplings are too small to catch rope
             const ax = t.x
             const ay = t.y + 11

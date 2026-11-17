@@ -1,4 +1,8 @@
 import { pointToPolylineDist } from './geometry'
+import { state } from '../game/state'
+import { pushPlotState } from './plotFactory'
+import { PLOT_COLS, PLOT_ROWS, PLOT_SPACING } from './plotConstants'
+import type { WorldSettings } from '../game/worldSettings'
 
 export type DecorType = 'cow_skull' | 'pebbles' | 'grass'
 
@@ -975,3 +979,22 @@ export function scatterTrailRockClusters(
   }
   return out
 }
+
+export function populateInitialState(seed: number, _settings: WorldSettings): void {
+  state.resetAll()
+  state.worldSeed = seed
+
+  const cx = state.worldBounds.minX + state.worldBounds.width / 2
+  const cy = state.worldBounds.minY + state.worldBounds.height / 2
+  const totalW = (PLOT_COLS - 1) * PLOT_SPACING
+  const totalH = (PLOT_ROWS - 1) * PLOT_SPACING
+  const startX = cx - totalW / 2
+  const startY = cy - totalH / 2
+  for (let r = 0; r < PLOT_ROWS; r++) {
+    for (let c = 0; c < PLOT_COLS; c++) {
+      pushPlotState(startX + c * PLOT_SPACING, startY + r * PLOT_SPACING)
+    }
+  }
+  pushPlotState(startX - PLOT_SPACING, startY + PLOT_ROWS * PLOT_SPACING, 'depot')
+}
+

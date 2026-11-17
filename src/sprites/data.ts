@@ -2954,8 +2954,8 @@ export const FENCE_GATE_OPEN: Sprite = [
 ]
 
 // ---- BRUSH GROUND ---- 8x8 ground tile
-const brL = '#b2c13d'   // brush light
-const brD = '#7c8f38'   // brush dark speck 
+const brL = '#afa654'   // brush light
+const brD = '#8f8e41'   // brush dark speck 
 export const BRUSH_GROUND: Sprite = [
   [brL,brL,brL,brL,brL,brL,brL,brL],
   [brL,brL,brL,brL,brL,brL,brL,brL],
@@ -2998,7 +2998,7 @@ export const TILLED_DIRT: Sprite = [
 ]
 
 
-const brr = '#d1e330'
+const brr = '#c5b733'
 
 export const BRUSH_EDGE_TOP: Sprite = [
   [_,_,_,_,_,_,_,_],
